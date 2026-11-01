@@ -1,18 +1,18 @@
 [package]
 name = "irongall"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/gregordinary/irongall"
+documentation = "https://docs.rs/irongall"
 description = "OpenPGP signature verification in safe Rust, with no dependencies"
 keywords = ["openpgp", "pgp", "signature", "verify", "cryptography"]
 categories = ["cryptography", "authentication", "parser-implementations", "no-std"]
-# The vendored test vectors and the fuzzing harness are development inputs, not
-# part of the published crate.
-exclude = ["/tests/vectors", "/fuzz"]
-# Not published until the first release.
-publish = false
+# What ships is the library and its documentation. The integration tests, the
+# vendored vectors every test reads, and the fuzzing harness are development
+# inputs, and stay in the repository, where the test suite runs.
+include = ["/src", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
 
 [lints.rust]
 unsafe_code = "forbid"

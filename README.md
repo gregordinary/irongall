@@ -2,8 +2,8 @@
 
 OpenPGP signature verification in safe Rust, with no dependencies.
 
-irongall is in early development. It is not yet published on crates.io, its
-API is not yet stable, and it has not had an independent security audit.
+irongall is in early development. Its API is not yet stable, and it has not
+had an independent security audit.
 
 Its scope is version 4 and version 6 OpenPGP signatures
 ([RFC 9580](https://www.rfc-editor.org/rfc/rfc9580)) over cleartext-signed
@@ -40,8 +40,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The crate documentation describes each layer, how a certificate and a
-signature are judged, and where irongall departs from RFC 9580 or from GnuPG.
+The [crate documentation](https://docs.rs/irongall) describes each layer,
+how a certificate and a signature are judged, and where irongall departs
+from RFC 9580 or from GnuPG.
 
 ## Testing
 

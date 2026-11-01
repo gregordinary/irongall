@@ -184,15 +184,16 @@ impl VerifyError {
     }
 }
 
-impl From<RsaError> for VerifyError {
-    fn from(error: RsaError) -> VerifyError {
-        match error {
-            RsaError::ModulusTooShort => VerifyError::ModulusTooShort,
-            RsaError::ModulusTooLong => VerifyError::ModulusTooLong,
-            RsaError::ExponentTooLarge => VerifyError::ExponentTooLarge,
-            RsaError::InvalidKey => VerifyError::InvalidKey,
-            RsaError::BadSignature => VerifyError::BadSignature,
-        }
+/// The [`VerifyError`] an RSA key's refusal, or its signature's, is reported
+/// as. A function rather than a `From` implementation, which would put the
+/// conversion in the public API beside the public [`RsaError`].
+fn rsa_failure(error: RsaError) -> VerifyError {
+    match error {
+        RsaError::ModulusTooShort => VerifyError::ModulusTooShort,
+        RsaError::ModulusTooLong => VerifyError::ModulusTooLong,
+        RsaError::ExponentTooLarge => VerifyError::ExponentTooLarge,
+        RsaError::InvalidKey => VerifyError::InvalidKey,
+        RsaError::BadSignature => VerifyError::BadSignature,
     }
 }
 
@@ -346,7 +347,9 @@ impl Signature {
                 modulus,
                 exponent,
                 value,
-            } => rsa::verify(modulus, exponent, digest, value)?,
+            } => rsa::PublicKey::new(modulus, exponent)
+                .and_then(|key| key.verify(digest, value))
+                .map_err(rsa_failure)?,
             Check::Ed25519 { key, value } => ed25519::verify(key, digest, value)?,
         }
         Ok(())
@@ -561,7 +564,7 @@ impl<'a> VerifyingKey<'a> {
 pub(crate) fn check_verifying_key(key: &PublicKey) -> Result<(), VerifyError> {
     match VerifyingKey::of(key)? {
         VerifyingKey::Rsa { modulus, exponent } => {
-            rsa::check_key(modulus, exponent)?;
+            rsa::check_key(modulus, exponent).map_err(rsa_failure)?;
         }
         VerifyingKey::Ed25519(key) => ed25519::check_key(key)?,
     }

@@ -9,6 +9,19 @@ caller must act on is prefixed **Breaking.**
 A change to what irongall accepts is recorded even when no signature of the
 public API changes, since a verifier's verdicts are part of its contract.
 
+## [Unreleased]
+
+### Added
+
+- `rsa::PublicKey`, which verifies an RSA PKCS #1 v1.5 signature over a
+  digest the caller computed, for a format outside OpenPGP that signs the
+  same way. It holds a key to the bounds every RSA key in irongall is held
+  to, 2048 to 8192 bits with an odd exponent from 3 to 2^33 - 1, and refuses
+  any other with `rsa::RsaError`. It verifies over any hash function irongall
+  implements, SHA-1 included, and leaves which ones to accept to the caller.
+- `hash::Digest`, a digest tagged with the function that computed it, the
+  form `rsa::PublicKey::verify` takes it in.
+
 ## [0.1.0] - 2026-10-31
 
 The first release.

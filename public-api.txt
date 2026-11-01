@@ -184,6 +184,23 @@ impl core::panic::unwind_safe::UnwindSafe for irongall::document::Detached
 pub fn irongall::document::cleartext(&[u8]) -> core::result::Result<irongall::document::Cleartext, irongall::document::DocumentError>
 pub fn irongall::document::detached(&[u8]) -> core::result::Result<irongall::document::Detached, irongall::document::DocumentError>
 pub mod irongall::hash
+#[non_exhaustive] pub enum irongall::hash::Digest
+pub irongall::hash::Digest::Sha1([u8; 20])
+pub irongall::hash::Digest::Sha224([u8; 28])
+pub irongall::hash::Digest::Sha256([u8; 32])
+pub irongall::hash::Digest::Sha384([u8; 48])
+pub irongall::hash::Digest::Sha3_256([u8; 32])
+pub irongall::hash::Digest::Sha3_512([u8; 64])
+pub irongall::hash::Digest::Sha512([u8; 64])
+impl irongall::hash::Digest
+pub fn irongall::hash::Digest::as_bytes(&self) -> &[u8]
+impl core::marker::Freeze for irongall::hash::Digest
+impl core::marker::Send for irongall::hash::Digest
+impl core::marker::Sync for irongall::hash::Digest
+impl core::marker::Unpin for irongall::hash::Digest
+impl core::marker::UnsafeUnpin for irongall::hash::Digest
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Digest
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Digest
 pub struct irongall::hash::HashAlgorithm(_)
 impl irongall::hash::HashAlgorithm
 pub const irongall::hash::HashAlgorithm::MD5: irongall::hash::HashAlgorithm
@@ -701,6 +718,36 @@ impl core::marker::Unpin for irongall::policy::Window
 impl core::marker::UnsafeUnpin for irongall::policy::Window
 impl core::panic::unwind_safe::RefUnwindSafe for irongall::policy::Window
 impl core::panic::unwind_safe::UnwindSafe for irongall::policy::Window
+pub mod irongall::rsa
+#[non_exhaustive] pub enum irongall::rsa::RsaError
+pub irongall::rsa::RsaError::BadSignature
+pub irongall::rsa::RsaError::ExponentTooLarge
+pub irongall::rsa::RsaError::InvalidKey
+pub irongall::rsa::RsaError::ModulusTooLong
+pub irongall::rsa::RsaError::ModulusTooShort
+impl core::error::Error for irongall::rsa::RsaError
+impl core::fmt::Display for irongall::rsa::RsaError
+pub fn irongall::rsa::RsaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::rsa::RsaError
+impl core::marker::Send for irongall::rsa::RsaError
+impl core::marker::Sync for irongall::rsa::RsaError
+impl core::marker::Unpin for irongall::rsa::RsaError
+impl core::marker::UnsafeUnpin for irongall::rsa::RsaError
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::rsa::RsaError
+impl core::panic::unwind_safe::UnwindSafe for irongall::rsa::RsaError
+pub struct irongall::rsa::PublicKey
+impl irongall::rsa::PublicKey
+pub fn irongall::rsa::PublicKey::new(&[u8], &[u8]) -> core::result::Result<irongall::rsa::PublicKey, irongall::rsa::RsaError>
+pub fn irongall::rsa::PublicKey::verify(&self, &irongall::hash::Digest, &[u8]) -> core::result::Result<(), irongall::rsa::RsaError>
+impl core::fmt::Debug for irongall::rsa::PublicKey
+pub fn irongall::rsa::PublicKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::rsa::PublicKey
+impl core::marker::Send for irongall::rsa::PublicKey
+impl core::marker::Sync for irongall::rsa::PublicKey
+impl core::marker::Unpin for irongall::rsa::PublicKey
+impl core::marker::UnsafeUnpin for irongall::rsa::PublicKey
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::rsa::PublicKey
+impl core::panic::unwind_safe::UnwindSafe for irongall::rsa::PublicKey
 pub mod irongall::signature
 #[non_exhaustive] pub enum irongall::signature::SignatureMaterial
 pub irongall::signature::SignatureMaterial::Ed25519([u8; 64])

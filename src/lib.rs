@@ -43,6 +43,8 @@
 //! - [`keyring`] verifies a document's signatures against the certificates a
 //!   caller trusts, under a policy.
 //! - [`hash`] holds the hash functions OpenPGP is defined over.
+//! - [`rsa`] verifies an RSA signature over a digest, as OpenPGP's RSA keys
+//!   sign, for any format that signs the same way.
 //!
 //! The crate is `no_std` and needs only an allocator.
 //!
@@ -193,7 +195,7 @@ pub mod key;
 pub mod keyring;
 pub mod packet;
 pub mod policy;
-mod rsa;
+pub mod rsa;
 pub mod signature;
 mod wire;
 

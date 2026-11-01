@@ -1,6 +1,27 @@
 //! RSA signature verification: RSASSA-PKCS1-v1_5 (RFC 8017 §8.2.2), as
 //! OpenPGP signs with it (RFC 9580 §5.2.3.1).
 //!
+//! [`PublicKey`] verifies a signature over a [`Digest`] the caller computed,
+//! so a format outside OpenPGP that signs the same way can verify through it:
+//!
+//! ```no_run
+//! use irongall::hash::{Digest, HashFunction as _, Sha256};
+//! use irongall::rsa::PublicKey;
+//!
+//! # fn material() -> (Vec<u8>, Vec<u8>, Vec<u8>) { unimplemented!() }
+//! // The key's modulus and public exponent, and the signature, as
+//! // big-endian integers.
+//! let (modulus, exponent, signature) = material();
+//! let key = PublicKey::new(&modulus, &exponent)?;
+//! key.verify(&Digest::Sha256(Sha256::digest(b"the signed data")), &signature)?;
+//! # Ok::<(), irongall::rsa::RsaError>(())
+//! ```
+//!
+//! It verifies what the signature computes, not what the digest is worth. It
+//! accepts a digest of any function [`Digest`] names, SHA-1 among them, and
+//! which functions a format may rest on is that format's decision; the
+//! [`policy`](crate::policy) module makes it for OpenPGP.
+//!
 //! The signature is verified by construction and comparison: the encoding a
 //! valid signature must recover, `0x00 0x01 0xFF.. 0x00 DigestInfo digest`, is
 //! built from the digest, and compared whole against the value the signature
@@ -19,6 +40,7 @@
 mod tests;
 
 use alloc::vec::Vec;
+use core::fmt;
 
 use crate::bignum::{self, Modulus};
 use crate::hash::Digest;
@@ -32,9 +54,10 @@ const MAXIMUM_MODULUS_BITS: usize = 8192;
 /// The largest public exponent irongall verifies with.
 const MAXIMUM_EXPONENT: u64 = (1 << 33) - 1;
 
-/// Why an RSA signature does not verify.
+/// Why an RSA key is refused, or a signature does not verify.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RsaError {
+#[non_exhaustive]
+pub enum RsaError {
     /// The modulus is narrower than 2048 bits, which RFC 9580 §12.4 forbids
     /// verifying with.
     ModulusTooShort,
@@ -49,28 +72,88 @@ pub(crate) enum RsaError {
     BadSignature,
 }
 
-/// Verifies that `signature`, an RSA signature value as OpenPGP carries it
-/// (an integer, big-endian), is the key's signature over `digest`.
+impl fmt::Display for RsaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            RsaError::ModulusTooShort => "an RSA modulus narrower than 2048 bits",
+            RsaError::ModulusTooLong => "an RSA modulus wider than 8192 bits",
+            RsaError::ExponentTooLarge => "an RSA public exponent larger than 2^33 - 1",
+            RsaError::InvalidKey => "key material that is not an RSA public key",
+            RsaError::BadSignature => "a signature the key did not make over the digest",
+        })
+    }
+}
+
+impl core::error::Error for RsaError {}
+
+/// An RSA public key irongall verifies with: a modulus of 2048 to 8192 bits,
+/// and an odd public exponent from 3 to 2^33 - 1.
 ///
-/// `modulus` and `exponent` are the key's, big-endian. Leading zeros in any
-/// of the three are not significant.
-pub(crate) fn verify(
-    modulus: &[u8],
-    exponent: &[u8],
-    digest: &Digest,
-    signature: &[u8],
-) -> Result<(), RsaError> {
-    let exponent = check_key(modulus, exponent)?;
-    let bits = bignum::bit_length(modulus);
-    let modulus = Modulus::new(modulus).ok_or(RsaError::InvalidKey)?;
-    // RFC 8017 §5.2.2 refuses a signature that is not below the modulus.
-    let recovered = modulus
-        .pow(signature, exponent)
-        .ok_or(RsaError::BadSignature)?;
-    if recovered == encoding(digest, bits.div_ceil(8)) {
-        Ok(())
-    } else {
-        Err(RsaError::BadSignature)
+/// The key is checked once, when it is made, and prepared for the arithmetic
+/// every verification with it repeats.
+#[derive(Clone)]
+pub struct PublicKey {
+    modulus: Modulus,
+    exponent: u64,
+    /// The modulus's width in bits, which sets the length of the encoding a
+    /// signature must recover.
+    bits: usize,
+}
+
+impl PublicKey {
+    /// The key with the modulus `modulus` and the public exponent
+    /// `exponent`, each a big-endian integer whose leading zeros are not
+    /// significant.
+    ///
+    /// # Errors
+    ///
+    /// [`RsaError::ModulusTooShort`] or [`RsaError::ModulusTooLong`] for a
+    /// modulus narrower than 2048 bits or wider than 8192,
+    /// [`RsaError::ExponentTooLarge`] for an exponent larger than 2^33 - 1,
+    /// and [`RsaError::InvalidKey`] for an even modulus, or an exponent that
+    /// is even or less than 3.
+    pub fn new(modulus: &[u8], exponent: &[u8]) -> Result<PublicKey, RsaError> {
+        let exponent = check_key(modulus, exponent)?;
+        let bits = bignum::bit_length(modulus);
+        let modulus = Modulus::new(modulus).ok_or(RsaError::InvalidKey)?;
+        Ok(PublicKey {
+            modulus,
+            exponent,
+            bits,
+        })
+    }
+
+    /// Verifies that `signature`, a big-endian integer whose leading zeros
+    /// are not significant, is the key's RSASSA-PKCS1-v1_5 signature over
+    /// `digest`.
+    ///
+    /// # Errors
+    ///
+    /// [`RsaError::BadSignature`] for a signature the key did not make over
+    /// `digest`, one that is not below the modulus among them.
+    pub fn verify(&self, digest: &Digest, signature: &[u8]) -> Result<(), RsaError> {
+        // RFC 8017 §5.2.2 refuses a signature that is not below the modulus.
+        let recovered = self
+            .modulus
+            .pow(signature, self.exponent)
+            .ok_or(RsaError::BadSignature)?;
+        if recovered == encoding(digest, self.bits.div_ceil(8)) {
+            Ok(())
+        } else {
+            Err(RsaError::BadSignature)
+        }
+    }
+}
+
+/// Names the key by its width and exponent. The modulus, and the arithmetic
+/// prepared from it, would fill a screen and identify nothing a reader
+/// compares by eye.
+impl fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PublicKey")
+            .field("bits", &self.bits)
+            .field("exponent", &self.exponent)
+            .finish_non_exhaustive()
     }
 }
 
@@ -79,8 +162,8 @@ pub(crate) fn verify(
 /// documentation gives, the exponent odd, at least 3, and within its bound.
 /// Returns the exponent.
 ///
-/// [`verify`] refuses any other key whatever the signature, and the policy
-/// accepts no other key, through this one check.
+/// [`PublicKey::new`] refuses any other key, and the policy accepts no other
+/// key, through this one check.
 pub(crate) fn check_key(modulus: &[u8], exponent: &[u8]) -> Result<u64, RsaError> {
     let bits = bignum::bit_length(modulus);
     if bits < MINIMUM_MODULUS_BITS {

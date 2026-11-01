@@ -62,3 +62,10 @@ path = "fuzz_targets/differential.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "rsa"
+path = "fuzz_targets/rsa.rs"
+test = false
+doc = false
+bench = false

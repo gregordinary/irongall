@@ -4,7 +4,7 @@
 use alloc::format;
 use alloc::vec::Vec;
 
-use super::{RsaError, verify};
+use super::RsaError;
 use crate::hash::{Digest, HashAlgorithm, HashFunction, Sha256};
 use crate::key::{KeyMaterial, PublicKey};
 use crate::packet::{self, Packet, Tag};
@@ -12,6 +12,18 @@ use crate::signature::{Signature, SignatureMaterial, SignatureType};
 use crate::test_support::{
     Json, digest, hashed_key, hashed_user_id, hex, signature_digest, vector, vector_bytes,
 };
+
+/// Verifies `signature` over `digest` with the key `modulus` and `exponent`
+/// make, as a caller of the public API does: the key's refusal, if it has
+/// one, or the signature's verdict.
+fn verify(
+    modulus: &[u8],
+    exponent: &[u8],
+    digest: &Digest,
+    signature: &[u8],
+) -> Result<(), RsaError> {
+    super::PublicKey::new(modulus, exponent)?.verify(digest, signature)
+}
 
 /// The hash algorithm Wycheproof names `name`.
 fn wycheproof_hash(name: &str) -> HashAlgorithm {
@@ -43,6 +55,8 @@ fn wycheproof(
         let modulus = hex(key.member("modulus").as_str());
         let exponent = hex(key.member("publicExponent").as_str());
         let hash = wycheproof_hash(group.member("sha").as_str());
+        // One key for the group, made once and used for each of its tests.
+        let group_key = super::PublicKey::new(&modulus, &exponent);
         for test in group.member("tests").as_array() {
             let id = test.member("tcId").as_usize();
             let digest = digest(hash, &hex(test.member("msg").as_str()));
@@ -54,12 +68,17 @@ fn wycheproof(
                 .iter()
                 .map(Json::as_str)
                 .collect();
+            let verdict = group_key
+                .as_ref()
+                .map_err(|error| *error)
+                .and_then(|key| key.verify(&digest, &signature));
             assert_eq!(
-                verify(&modulus, &exponent, &digest, &signature),
+                verdict,
                 expect(group, result, &flags),
                 "{file}, test {id}: {result} {flags:?}, {}",
                 test.member("comment").as_str()
             );
+            assert_eq!(verify(&modulus, &exponent, &digest, &signature), verdict);
             checked += 1;
         }
     }
@@ -265,6 +284,13 @@ fn key_bounds() {
             "exponent {exponent:02x?}"
         );
     }
+
+    // A key names its width and exponent, and not its modulus.
+    let key = super::PublicKey::new(&modulus, &e).unwrap();
+    assert_eq!(
+        format!("{key:?}"),
+        "PublicKey { bits: 2048, exponent: 65537, .. }"
+    );
 
     let mut even = modulus.clone();
     *even.last_mut().unwrap() &= !1;

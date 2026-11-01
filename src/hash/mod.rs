@@ -24,8 +24,9 @@
 //! acceleration, which would need `unsafe`. Their timing is not a design
 //! goal: everything irongall hashes is public.
 //!
-//! [`HashAlgorithm`] is the number a signature names its hash algorithm by,
-//! which may be one this module does not implement.
+//! [`Digest`] is a digest tagged with the function that computed it, the form
+//! a verifier takes it in. [`HashAlgorithm`] is the number a signature names
+//! its hash algorithm by, which may be one this module does not implement.
 
 mod sha1;
 mod sha256;
@@ -120,9 +121,17 @@ impl HashAlgorithm {
 ///
 /// A verifier takes its digest in this form, so a digest of the wrong length
 /// for its algorithm, or of an algorithm irongall does not implement, cannot
-/// reach it.
+/// reach it. [`rsa::PublicKey::verify`](crate::rsa::PublicKey::verify) is one:
+///
+/// ```
+/// use irongall::hash::{Digest, HashFunction as _, Sha256};
+///
+/// let digest = Digest::Sha256(Sha256::digest(b"OpenPGP"));
+/// assert_eq!(digest.as_bytes().len(), 32);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Digest {
+#[non_exhaustive]
+pub enum Digest {
     /// A SHA-1 digest.
     Sha1([u8; 20]),
     /// A SHA2-224 digest.
@@ -141,7 +150,7 @@ pub(crate) enum Digest {
 
 impl Digest {
     /// The digest's bytes.
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         match self {
             Digest::Sha1(bytes) => bytes,
             Digest::Sha224(bytes) => bytes,

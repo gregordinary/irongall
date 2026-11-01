@@ -1,0 +1,41 @@
+# off=0 ctb=98 tag=6 hlen=2 plen=82
+:public key packet:
+	version 4, algo 19, created 1767225600, expires 0
+	pkey[0]: [72 bits] nistp256 (1.2.840.10045.3.1.7)
+	pkey[1]: [515 bits]
+	keyid: 10123D1092DDB2EC
+# off=84 ctb=b4 tag=13 hlen=2 plen=50
+:user ID packet: "irongall test, nistp256 <nistp256@example.invalid>"
+# off=136 ctb=88 tag=2 hlen=2 plen=147
+:signature packet: algo 19, keyid 10123D1092DDB2EC
+	version 4, created 1767225600, md5len 0, sigclass 0x13
+	digest algo 8, begin of digest 62 5f
+	hashed subpkt 33 len 21 (issuer fpr v4 FF1B8ACCAC0D9CC61531249F10123D1092DDB2EC)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 03)
+	hashed subpkt 11 len 4 (pref-sym-algos: 9 8 7 2)
+	hashed subpkt 34 len 1 (pref-aead-algos: 2)
+	hashed subpkt 21 len 5 (pref-hash-algos: 10 9 8 11 2)
+	hashed subpkt 22 len 3 (pref-zip-algos: 2 3 1)
+	hashed subpkt 30 len 1 (features: 07)
+	hashed subpkt 23 len 1 (keyserver preferences: 80)
+	subpkt 16 len 8 (issuer key ID 10123D1092DDB2EC)
+	data: [256 bits]
+	data: [256 bits]
+# off=285 ctb=b8 tag=14 hlen=2 plen=86
+:public sub key packet:
+	version 4, algo 18, created 1767225600, expires 0
+	pkey[0]: [72 bits] nistp256 (1.2.840.10045.3.1.7)
+	pkey[1]: [515 bits]
+	pkey[2]: [32 bits]
+	keyid: FE0DE42C4CD0686E
+# off=373 ctb=88 tag=2 hlen=2 plen=120
+:signature packet: algo 19, keyid 10123D1092DDB2EC
+	version 4, created 1767225600, md5len 0, sigclass 0x18
+	digest algo 8, begin of digest 68 69
+	hashed subpkt 33 len 21 (issuer fpr v4 FF1B8ACCAC0D9CC61531249F10123D1092DDB2EC)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 0C)
+	subpkt 16 len 8 (issuer key ID 10123D1092DDB2EC)
+	data: [254 bits]
+	data: [256 bits]

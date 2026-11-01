@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Started by hand against a chosen ref. A push event is delivered once and is
+  # not redelivered, so a commit whose delivery was dropped otherwise has no way
+  # to be checked short of pushing another commit to trigger one.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Format, lint, test, docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (pinned)
+        # rust-toolchain.toml pins the toolchain and its components, so fmt,
+        # clippy, and the build all run under the same rustfmt everywhere.
+        run: rustup show
+      - name: Cache the dependency build
+        # Keyed on the lockfile and the job. The library has no dependencies,
+        # so what this holds is the reference implementations the tests use.
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        # The panic-freedom lints in src/lib.rs are denied outright; -D warnings
+        # adds everything else clippy warns about.
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-features
+      - name: Documentation (warning-clean)
+        run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (MSRV)
+        # The `+1.91` override wins over the pinned toolchain, which sits ahead
+        # of the floor, so this checks the version `rust-version` promises
+        # rather than the one contributors use.
+        run: rustup toolchain install 1.91 --profile minimal
+      - name: Cache the dependency build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Check
+        # Warnings are errors here too. Some arise only at the floor: an
+        # `expect` that a later compiler fulfills can go unfulfilled.
+        run: cargo +1.91 check --all-targets --all-features
+        env:
+          RUSTFLAGS: -D warnings
+
+  deny:
+    name: License and advisory policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check dependency licenses and advisories
+        # deny.toml pins the permitted licenses, the advisory policy, and the
+        # registries a dependency may come from, dev-dependencies included.
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses advisories sources
+
+  fuzz:
+    name: Fuzz targets build
+    runs-on: ubuntu-latest
+    env:
+      # cargo-fuzz needs a nightly compiler for its sanitizer flags. Pinned, so
+      # this job fails on a change to the targets rather than on a nightly's
+      # regression, and bumped deliberately.
+      FUZZ_NIGHTLY: nightly-2026-07-09
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (pinned nightly) and cargo-fuzz
+        run: |
+          rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal
+          cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Build every target
+        # Building, not running: a fuzzing run is not a pass or fail a pull
+        # request can wait on. What this catches is a target left behind by a
+        # change to the API it drives.
+        working-directory: fuzz
+        run: cargo "+$FUZZ_NIGHTLY" fuzz build

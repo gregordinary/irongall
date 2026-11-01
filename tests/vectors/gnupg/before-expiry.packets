@@ -1,0 +1,9 @@
+# off=0 ctb=88 tag=2 hlen=2 plen=117
+:signature packet: algo 22, keyid 3BBFAA56ECF9B1BF
+	version 4, created 1770681600, md5len 0, sigclass 0x00
+	digest algo 10, begin of digest 06 26
+	hashed subpkt 33 len 21 (issuer fpr v4 D4655745C0AFC6BADC0322D63BBFAA56ECF9B1BF)
+	hashed subpkt 2 len 4 (sig created 2026-02-10)
+	subpkt 16 len 8 (issuer key ID 3BBFAA56ECF9B1BF)
+	data: [256 bits]
+	data: [256 bits]

@@ -1,0 +1,7 @@
+# Types whose arithmetic operators are total, which `arithmetic_side_effects`
+# (denied in `src/lib.rs`) would otherwise flag at every use. A field element's
+# operators compute modulo p and cannot overflow or panic; the integer
+# arithmetic inside them carries its own `expect`, with the bounds that make it
+# safe. The path is the type's within the crate: if the type moves, the lint
+# fires again rather than going quiet.
+arithmetic-side-effects-allowed = ["ed25519::field::FieldElement"]

@@ -1,0 +1,6 @@
+tru::1:1793491515:0:3:1:5
+pub:r:255:22:19BAC408BA710111:1770681600:::-:::sc:::::ed25519:::0:
+fpr:::::::::2CE65EF8185F4CBF9BC30F4919BAC408BA710111:
+rev:!::22:19BAC408BA710111:1770768000::::irongall test, revoked-sha1 <revoked-sha1@example.invalid>:20x,00::2CE65EF8185F4CBF9BC30F4919BAC408BA710111:::2:
+uid:r::::1770681600::9A6542AD6C5F1C65B2BA64131DD03642383D8DD9::irongall test, revoked-sha1 <revoked-sha1@example.invalid>::::::::::0:
+sig:!::22:19BAC408BA710111:1770681600::::irongall test, revoked-sha1 <revoked-sha1@example.invalid>:13x::2CE65EF8185F4CBF9BC30F4919BAC408BA710111:::10:

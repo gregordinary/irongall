@@ -1,0 +1,43 @@
+# off=0 ctb=99 tag=6 hlen=3 plen=814
+:public key packet:
+	version 4, algo 17, created 1767225600, expires 0
+	pkey[0]: [2048 bits]
+	pkey[1]: [256 bits]
+	pkey[2]: [2047 bits]
+	pkey[3]: [2048 bits]
+	keyid: D6CAD719A6E5F516
+# off=817 ctb=b4 tag=13 hlen=2 plen=40
+:user ID packet: "irongall test, dsa <dsa@example.invalid>"
+# off=859 ctb=88 tag=2 hlen=2 plen=147
+:signature packet: algo 17, keyid D6CAD719A6E5F516
+	version 4, created 1767225600, md5len 0, sigclass 0x13
+	digest algo 8, begin of digest a6 11
+	hashed subpkt 33 len 21 (issuer fpr v4 CD5593C46CF4BB8FC0EE206CD6CAD719A6E5F516)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 03)
+	hashed subpkt 11 len 4 (pref-sym-algos: 9 8 7 2)
+	hashed subpkt 34 len 1 (pref-aead-algos: 2)
+	hashed subpkt 21 len 5 (pref-hash-algos: 10 9 8 11 2)
+	hashed subpkt 22 len 3 (pref-zip-algos: 2 3 1)
+	hashed subpkt 30 len 1 (features: 07)
+	hashed subpkt 23 len 1 (keyserver preferences: 80)
+	subpkt 16 len 8 (issuer key ID D6CAD719A6E5F516)
+	data: [256 bits]
+	data: [252 bits]
+# off=1008 ctb=b9 tag=14 hlen=3 plen=525
+:public sub key packet:
+	version 4, algo 16, created 1767225600, expires 0
+	pkey[0]: [2048 bits]
+	pkey[1]: [3 bits]
+	pkey[2]: [2047 bits]
+	keyid: C90907596E129BE7
+# off=1536 ctb=88 tag=2 hlen=2 plen=120
+:signature packet: algo 17, keyid D6CAD719A6E5F516
+	version 4, created 1767225600, md5len 0, sigclass 0x18
+	digest algo 8, begin of digest 38 c9
+	hashed subpkt 33 len 21 (issuer fpr v4 CD5593C46CF4BB8FC0EE206CD6CAD719A6E5F516)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 0C)
+	subpkt 16 len 8 (issuer key ID D6CAD719A6E5F516)
+	data: [255 bits]
+	data: [254 bits]

@@ -1,0 +1,9 @@
+irongall test, cleartext
+- a line that begins with a dash
+From the start of a line
+trailing spaces   
+trailing tab	
+-----BEGIN PGP SIGNATURE----- inside the text
+
+the last line before an empty one
+

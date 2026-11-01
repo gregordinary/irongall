@@ -1,0 +1,6 @@
+irongall test, text mode
+a lone CRin the middle of a line
+a CR before CR LF
+a CR, then a space 
+CR LF
+ends in a CR

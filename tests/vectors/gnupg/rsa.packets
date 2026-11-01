@@ -1,0 +1,38 @@
+# off=0 ctb=99 tag=6 hlen=3 plen=269
+:public key packet:
+	version 4, algo 1, created 1767225600, expires 0
+	pkey[0]: [2048 bits]
+	pkey[1]: [17 bits]
+	keyid: 55396F72E2941ED9
+# off=272 ctb=b4 tag=13 hlen=2 plen=40
+:user ID packet: "irongall test, rsa <rsa@example.invalid>"
+# off=314 ctb=89 tag=2 hlen=3 plen=337
+:signature packet: algo 1, keyid 55396F72E2941ED9
+	version 4, created 1767225600, md5len 0, sigclass 0x13
+	digest algo 10, begin of digest 82 ec
+	hashed subpkt 33 len 21 (issuer fpr v4 5720663AA8D8410A852E604C55396F72E2941ED9)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 03)
+	hashed subpkt 11 len 4 (pref-sym-algos: 9 8 7 2)
+	hashed subpkt 34 len 1 (pref-aead-algos: 2)
+	hashed subpkt 21 len 5 (pref-hash-algos: 10 9 8 11 2)
+	hashed subpkt 22 len 3 (pref-zip-algos: 2 3 1)
+	hashed subpkt 30 len 1 (features: 07)
+	hashed subpkt 23 len 1 (keyserver preferences: 80)
+	subpkt 16 len 8 (issuer key ID 55396F72E2941ED9)
+	data: [2048 bits]
+# off=654 ctb=b9 tag=14 hlen=3 plen=269
+:public sub key packet:
+	version 4, algo 1, created 1767225600, expires 0
+	pkey[0]: [2048 bits]
+	pkey[1]: [17 bits]
+	keyid: 1CB427FA98EAE147
+# off=926 ctb=89 tag=2 hlen=3 plen=310
+:signature packet: algo 1, keyid 55396F72E2941ED9
+	version 4, created 1767225600, md5len 0, sigclass 0x18
+	digest algo 10, begin of digest 6f 41
+	hashed subpkt 33 len 21 (issuer fpr v4 5720663AA8D8410A852E604C55396F72E2941ED9)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 0C)
+	subpkt 16 len 8 (issuer key ID 55396F72E2941ED9)
+	data: [2044 bits]

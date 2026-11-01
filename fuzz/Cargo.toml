@@ -1,0 +1,64 @@
+[package]
+name = "irongall-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+irongall = { path = ".." }
+# The reference implementation the `differential` target compares against,
+# and what its comparison reads rPGP's keys with.
+ed25519-dalek = { version = "2.2", default-features = false }
+pgp = { version = "0.21", default-features = false }
+rsa = { version = "0.9", default-features = false }
+
+# A workspace of its own, so the fuzzing harness never joins the library's
+# build.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "armor"
+path = "fuzz_targets/armor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "packets"
+path = "fuzz_targets/packets.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "certificates"
+path = "fuzz_targets/certificates.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "documents"
+path = "fuzz_targets/documents.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "keyring"
+path = "fuzz_targets/keyring.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+bench = false

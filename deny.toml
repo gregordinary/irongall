@@ -1,0 +1,50 @@
+# cargo-deny configuration.
+#
+# The library has no dependencies. What this guards is the development graph,
+# which a contributor builds and runs: dev-dependencies are checked like any
+# other.
+
+[licenses]
+# cargo-deny leaves dev-dependencies out of the license check unless asked.
+include-dev = true
+# Reject a crate whose license text cannot be matched with high confidence,
+# rather than guessing.
+confidence-threshold = 0.9
+# The minimal set the current graph obliges us to honor. A crate offered under a
+# choice that includes MIT or Apache-2.0 is satisfied by those two.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    # ed25519-dalek and the curve arithmetic beneath it, which the Ed25519
+    # tests compare against.
+    "BSD-3-Clause",
+    # unicode-ident's Unicode tables, through the procedural macros of that
+    # curve arithmetic.
+    "Unicode-3.0",
+    # zlib-rs, through rPGP's compression support, which the differential
+    # tests compare against.
+    "Zlib",
+]
+
+# The RUSTSEC advisory gate: fails on a known advisory against any crate in the
+# graph. The two ignored concern secret keys, and reach only the differential
+# tests, through rPGP: the keys they sign with are generated for the test
+# from a fixed seed and are public in effect.
+[advisories]
+ignore = [
+    # Marvin Attack: recovering an RSA private key from the timing of its
+    # operations, in the `rsa` crate. No fixed release exists.
+    { id = "RUSTSEC-2023-0071", reason = "test-only; the RSA keys are generated from fixed seeds" },
+    # Timing variability in `crypto-bigint` operations on secret integers,
+    # through rPGP's elliptic-curve support. Fixed only in a line rPGP does
+    # not use yet.
+    { id = "RUSTSEC-2026-0387", reason = "test-only; every secret is generated for the test" },
+]
+
+# Where dependencies may come from: crates.io only. A dependency from a git
+# revision or a private registry is a decision to make deliberately, not one to
+# arrive unnoticed.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

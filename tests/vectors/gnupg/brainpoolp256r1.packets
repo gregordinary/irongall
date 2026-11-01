@@ -1,0 +1,41 @@
+# off=0 ctb=98 tag=6 hlen=2 plen=83
+:public key packet:
+	version 4, algo 19, created 1767225600, expires 0
+	pkey[0]: [80 bits] brainpoolP256r1 (1.3.36.3.3.2.8.1.1.7)
+	pkey[1]: [515 bits]
+	keyid: C97DC10A26D5BBE6
+# off=85 ctb=b4 tag=13 hlen=2 plen=64
+:user ID packet: "irongall test, brainpoolp256r1 <brainpoolp256r1@example.invalid>"
+# off=151 ctb=88 tag=2 hlen=2 plen=147
+:signature packet: algo 19, keyid C97DC10A26D5BBE6
+	version 4, created 1767225600, md5len 0, sigclass 0x13
+	digest algo 8, begin of digest ec 9a
+	hashed subpkt 33 len 21 (issuer fpr v4 F3A29EC7C53910AA619AC4CEC97DC10A26D5BBE6)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 03)
+	hashed subpkt 11 len 4 (pref-sym-algos: 9 8 7 2)
+	hashed subpkt 34 len 1 (pref-aead-algos: 2)
+	hashed subpkt 21 len 5 (pref-hash-algos: 10 9 8 11 2)
+	hashed subpkt 22 len 3 (pref-zip-algos: 2 3 1)
+	hashed subpkt 30 len 1 (features: 07)
+	hashed subpkt 23 len 1 (keyserver preferences: 80)
+	subpkt 16 len 8 (issuer key ID C97DC10A26D5BBE6)
+	data: [256 bits]
+	data: [256 bits]
+# off=300 ctb=b8 tag=14 hlen=2 plen=87
+:public sub key packet:
+	version 4, algo 18, created 1767225600, expires 0
+	pkey[0]: [80 bits] brainpoolP256r1 (1.3.36.3.3.2.8.1.1.7)
+	pkey[1]: [515 bits]
+	pkey[2]: [32 bits]
+	keyid: 54A7CDA31188E4EB
+# off=389 ctb=88 tag=2 hlen=2 plen=120
+:signature packet: algo 19, keyid C97DC10A26D5BBE6
+	version 4, created 1767225600, md5len 0, sigclass 0x18
+	digest algo 8, begin of digest d7 3e
+	hashed subpkt 33 len 21 (issuer fpr v4 F3A29EC7C53910AA619AC4CEC97DC10A26D5BBE6)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	hashed subpkt 27 len 1 (key flags: 0C)
+	subpkt 16 len 8 (issuer key ID C97DC10A26D5BBE6)
+	data: [255 bits]
+	data: [253 bits]

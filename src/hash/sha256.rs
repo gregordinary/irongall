@@ -1,0 +1,174 @@
+//! SHA2-224 and SHA2-256 (FIPS 180-4 §6.2 and §6.3), which differ only in
+//! their initial state and in how much of the final state they output.
+
+use super::{BlockBuffer, HashFunction, ch, maj, write_words};
+
+/// SHA2-224 (FIPS 180-4 §6.3), with a 28-byte digest.
+#[derive(Debug, Clone)]
+pub struct Sha224(Engine);
+
+impl Default for Sha224 {
+    fn default() -> Sha224 {
+        <Sha224 as HashFunction>::new()
+    }
+}
+
+impl HashFunction for Sha224 {
+    type Output = [u8; 28];
+
+    fn new() -> Sha224 {
+        Sha224(Engine::new([
+            0xC105_9ED8,
+            0x367C_D507,
+            0x3070_DD17,
+            0xF70E_5939,
+            0xFFC0_0B31,
+            0x6858_1511,
+            0x64F9_8FA7,
+            0xBEFA_4FA4,
+        ]))
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        self.0.update(data);
+    }
+
+    fn finalize(self) -> [u8; 28] {
+        let mut output = [0; 28];
+        write_words(&self.0.finish(), &mut output);
+        output
+    }
+}
+
+/// SHA2-256 (FIPS 180-4 §6.2), with a 32-byte digest.
+#[derive(Debug, Clone)]
+pub struct Sha256(Engine);
+
+impl Default for Sha256 {
+    fn default() -> Sha256 {
+        <Sha256 as HashFunction>::new()
+    }
+}
+
+impl HashFunction for Sha256 {
+    type Output = [u8; 32];
+
+    fn new() -> Sha256 {
+        Sha256(Engine::new([
+            0x6A09_E667,
+            0xBB67_AE85,
+            0x3C6E_F372,
+            0xA54F_F53A,
+            0x510E_527F,
+            0x9B05_688C,
+            0x1F83_D9AB,
+            0x5BE0_CD19,
+        ]))
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        self.0.update(data);
+    }
+
+    fn finalize(self) -> [u8; 32] {
+        let mut output = [0; 32];
+        write_words(&self.0.finish(), &mut output);
+        output
+    }
+}
+
+/// The computation SHA2-224 and SHA2-256 share.
+#[derive(Debug, Clone)]
+struct Engine {
+    state: [u32; 8],
+    buffer: BlockBuffer<64>,
+    /// The input length in bytes, modulo 2^64.
+    length: u64,
+}
+
+impl Engine {
+    fn new(state: [u32; 8]) -> Engine {
+        Engine {
+            state,
+            buffer: BlockBuffer::new(),
+            length: 0,
+        }
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        self.length = self.length.wrapping_add(data.len() as u64);
+        self.buffer
+            .update(data, |block| compress(&mut self.state, block));
+    }
+
+    fn finish(mut self) -> [u32; 8] {
+        let bits = self.length.wrapping_mul(8).to_be_bytes();
+        self.buffer
+            .finish(&bits, |block| compress(&mut self.state, block));
+        self.state
+    }
+}
+
+/// The round constants (FIPS 180-4 §4.2.2).
+///
+/// Laid out in rows as the standard prints them, so the table can be read
+/// against it.
+#[rustfmt::skip]
+const K: [u32; 64] = [
+    0x428A_2F98, 0x7137_4491, 0xB5C0_FBCF, 0xE9B5_DBA5, 0x3956_C25B, 0x59F1_11F1, 0x923F_82A4, 0xAB1C_5ED5,
+    0xD807_AA98, 0x1283_5B01, 0x2431_85BE, 0x550C_7DC3, 0x72BE_5D74, 0x80DE_B1FE, 0x9BDC_06A7, 0xC19B_F174,
+    0xE49B_69C1, 0xEFBE_4786, 0x0FC1_9DC6, 0x240C_A1CC, 0x2DE9_2C6F, 0x4A74_84AA, 0x5CB0_A9DC, 0x76F9_88DA,
+    0x983E_5152, 0xA831_C66D, 0xB003_27C8, 0xBF59_7FC7, 0xC6E0_0BF3, 0xD5A7_9147, 0x06CA_6351, 0x1429_2967,
+    0x27B7_0A85, 0x2E1B_2138, 0x4D2C_6DFC, 0x5338_0D13, 0x650A_7354, 0x766A_0ABB, 0x81C2_C92E, 0x9272_2C85,
+    0xA2BF_E8A1, 0xA81A_664B, 0xC24B_8B70, 0xC76C_51A3, 0xD192_E819, 0xD699_0624, 0xF40E_3585, 0x106A_A070,
+    0x19A4_C116, 0x1E37_6C08, 0x2748_774C, 0x34B0_BCB5, 0x391C_0CB3, 0x4ED8_AA4A, 0x5B9C_CA4F, 0x682E_6FF3,
+    0x748F_82EE, 0x78A5_636F, 0x84C8_7814, 0x8CC7_0208, 0x90BE_FFFA, 0xA450_6CEB, 0xBEF9_A3F7, 0xC671_78F2,
+];
+
+/// The message schedule for one block (FIPS 180-4 §6.2.2, step 1).
+#[expect(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "`t` runs over 16..64, so every index is within the 64-word schedule"
+)]
+fn schedule(block: &[u8; 64]) -> [u32; 64] {
+    let mut w = [0; 64];
+    for (word, bytes) in w.iter_mut().zip(block.as_chunks::<4>().0) {
+        *word = u32::from_be_bytes(*bytes);
+    }
+    for t in 16..64 {
+        let s0 = w[t - 15].rotate_right(7) ^ w[t - 15].rotate_right(18) ^ (w[t - 15] >> 3);
+        let s1 = w[t - 2].rotate_right(17) ^ w[t - 2].rotate_right(19) ^ (w[t - 2] >> 10);
+        w[t] = s1
+            .wrapping_add(w[t - 7])
+            .wrapping_add(s0)
+            .wrapping_add(w[t - 16]);
+    }
+    w
+}
+
+/// Folds one block into the state (FIPS 180-4 §6.2.2, steps 2 to 4).
+fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
+    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
+    for (k, w) in K.into_iter().zip(schedule(block)) {
+        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+        let t1 = h
+            .wrapping_add(s1)
+            .wrapping_add(ch(e, f, g))
+            .wrapping_add(k)
+            .wrapping_add(w);
+        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+        let t2 = s0.wrapping_add(maj(a, b, c));
+        h = g;
+        g = f;
+        f = e;
+        e = d.wrapping_add(t1);
+        d = c;
+        c = b;
+        b = a;
+        a = t1.wrapping_add(t2);
+    }
+    for (word, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+        *word = word.wrapping_add(value);
+    }
+}

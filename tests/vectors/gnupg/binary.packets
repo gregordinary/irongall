@@ -1,0 +1,12 @@
+# off=0 ctb=88 tag=2 hlen=2 plen=190
+:signature packet: algo 22, keyid 524CAA0D2BA0AFC8
+	version 4, created 1767225600, md5len 0, sigclass 0x00
+	digest algo 10, begin of digest 75 d7
+	hashed subpkt 33 len 21 (issuer fpr v4 26C255C931467FBE42DDEF38524CAA0D2BA0AFC8)
+	hashed subpkt 2 len 4 (sig created 2026-01-01)
+	critical hashed subpkt 3 len 4 (sig expires after 2y0d0h0m)
+	hashed subpkt 20 len 33 (notation: note@example.invalid=value)
+	hashed subpkt 26 len 30 (policy: https://example.invalid/policy)
+	subpkt 16 len 8 (issuer key ID 524CAA0D2BA0AFC8)
+	data: [255 bits]
+	data: [256 bits]

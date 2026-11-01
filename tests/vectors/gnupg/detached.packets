@@ -1,0 +1,17 @@
+# off=0 ctb=88 tag=2 hlen=2 plen=117
+:signature packet: algo 22, keyid ABD5998F0CE0F594
+	version 4, created 1769904000, md5len 0, sigclass 0x00
+	digest algo 10, begin of digest 85 9d
+	hashed subpkt 33 len 21 (issuer fpr v4 0FB86D26BF8DCF0416CC727FABD5998F0CE0F594)
+	hashed subpkt 2 len 4 (sig created 2026-02-01)
+	subpkt 16 len 8 (issuer key ID ABD5998F0CE0F594)
+	data: [255 bits]
+	data: [255 bits]
+# off=119 ctb=89 tag=2 hlen=3 plen=435
+:signature packet: algo 1, keyid CF9D90B6D0DE2CA4
+	version 4, created 1769904000, md5len 0, sigclass 0x00
+	digest algo 10, begin of digest 2a e2
+	hashed subpkt 33 len 21 (issuer fpr v4 1C0C9980AFBBF9C5B87F031BCF9D90B6D0DE2CA4)
+	hashed subpkt 2 len 4 (sig created 2026-02-01)
+	subpkt 16 len 8 (issuer key ID CF9D90B6D0DE2CA4)
+	data: [3070 bits]

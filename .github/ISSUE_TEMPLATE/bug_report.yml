@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a verdict irongall gets wrong, or another defect.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report a signature irongall accepts and should not, or
+        another security issue, here. Use the private channel described in
+        [SECURITY.md](https://github.com/gregordinary/irongall/blob/main/SECURITY.md).
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >
+        The smallest program that shows the problem. Attach the input it
+        reads: the certificates, and the signed document or the signature and
+        the data it covers. Keys made for the report serve as well as real
+        ones.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: What irongall returned
+      description: The error in full, or the refusal and its reason.
+      render: text
+  - type: textarea
+    id: others
+    attributes:
+      label: Other implementations
+      description: >
+        How GnuPG, Sequoia, or another implementation judges the same input,
+        if you checked, and the command you checked it with.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit or crate version.
+    validations:
+      required: true

@@ -1,0 +1,3 @@
+# Vendored test vectors are kept byte-for-byte as their publishers ship them,
+# CRLF line endings included, so they can be compared against the source.
+/tests/vectors/** -text

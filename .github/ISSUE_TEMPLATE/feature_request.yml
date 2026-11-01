@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose something irongall does not do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to verify, and where irongall stops you.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: >
+        An API, an algorithm, a policy setting: whatever shape you imagine. A
+        sketch is enough; the shape is discussable.
+  - type: textarea
+    id: material
+    attributes:
+      label: Where it is needed
+      description: >
+        Material in use that needs it, such as an archive's keyring or the
+        algorithm of a key that signs, and which implementations already
+        support it.

@@ -1,0 +1,42 @@
+[package]
+name = "irongall"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.91"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/gregordinary/irongall"
+description = "OpenPGP signature verification in safe Rust, with no dependencies"
+keywords = ["openpgp", "pgp", "signature", "verify", "cryptography"]
+categories = ["cryptography", "authentication", "parser-implementations", "no-std"]
+# The vendored test vectors and the fuzzing harness are development inputs, not
+# part of the published crate.
+exclude = ["/tests/vectors", "/fuzz"]
+# Not published until the first release.
+publish = false
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[dependencies]
+
+# Reference implementations the tests compare against, and what the tests drive
+# them with: seeded randomness for rPGP's keys, and the `rsa` crate rPGP's RSA
+# keys are made of. None of them is reachable from the library.
+[dev-dependencies]
+base64 = "0.22"
+ed25519-dalek = { version = "2.2", default-features = false }
+num-bigint = "0.4"
+pgp = { version = "0.21", default-features = false }
+rand_chacha = "0.3"
+rsa = { version = "0.9", default-features = false }
+sha1 = "0.11"
+sha2 = "0.11"
+sha3 = "0.11"
+
+# Unoptimized, the RSA test vectors take ten seconds; lightly optimized, the
+# whole suite takes under one. Overflow checks and debug assertions stay on.
+[profile.test]
+opt-level = 1

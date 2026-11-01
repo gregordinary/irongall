@@ -60,6 +60,13 @@ change; the job pins the `cargo-public-api` version for the same reason. A
 type that gains or loses `Send` or `Sync` shows in the snapshot, and losing
 one is a breaking change.
 
+CI's `semver` job builds the newest release tag and the tree, and runs
+[cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks)
+between them. While `version` still names the last release, it fails on a
+breaking change and lists the items it breaks. Bumping the version to the
+next breaking release, 0.1.x to 0.2.0, turns it green, and each item it
+listed takes a **Breaking.** entry in CHANGELOG.md.
+
 ## Fuzzing
 
 `fuzz/` holds a [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) target

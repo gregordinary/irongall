@@ -48,6 +48,18 @@ The fifth checks the minimum supported Rust version, which sits below the
 pinned toolchain, and needs that toolchain installed. The last needs
 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny).
 
+## The public API
+
+`public-api.txt` is committed, so any change to the public surface arrives as
+a reviewable diff, and CI fails on a change the snapshot does not record.
+Regenerate it with the command in the `api` job of
+`.github/workflows/ci.yml`, with the nightly that job pins, and commit the
+result. The snapshot is rustdoc's JSON rendering, which differs between
+nightlies, so an unpinned regeneration produces a diff that is not an API
+change; the job pins the `cargo-public-api` version for the same reason. A
+type that gains or loses `Send` or `Sync` shows in the snapshot, and losing
+one is a breaking change.
+
 ## Fuzzing
 
 `fuzz/` holds a [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) target

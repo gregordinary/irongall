@@ -21,6 +21,8 @@
 - [ ] `cargo +1.91 check --all-targets --all-features` with `RUSTFLAGS='-D warnings'`
 - [ ] `cargo deny check licenses advisories sources`, if a dependency changed
 - [ ] The fuzz target of each parser the change touches has run for a while
+- [ ] The public surface is unchanged, **or** `public-api.txt` is regenerated
+      and the diff is intentional
 
 ## What it accepts
 

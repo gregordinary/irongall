@@ -61,6 +61,39 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
+  api:
+    name: Public API surface
+    runs-on: ubuntu-latest
+    env:
+      # cargo-public-api reads rustdoc's JSON output, whose rendering of paths
+      # changes between nightlies, so a floating nightly would fail this job on
+      # rustdoc drift rather than on an API change. Pinned, and bumped
+      # deliberately: a bump regenerates the snapshot, and that diff is
+      # reviewed like any other.
+      RUSTDOC_JSON_NIGHTLY: nightly-2026-07-09
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (pinned, plus the pinned nightly for rustdoc JSON)
+        run: |
+          rustup show
+          rustup toolchain install "$RUSTDOC_JSON_NIGHTLY" --profile minimal
+      - name: Install cargo-public-api
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-public-api@0.52.0
+      - name: Regenerate the snapshot
+        # Auto-trait impls are kept, so a type that gains or loses Send or Sync
+        # shows up in review. Blanket and auto-derived impls are omitted as
+        # noise.
+        run: |
+          RUSTUP_TOOLCHAIN="$RUSTDOC_JSON_NIGHTLY" cargo public-api --all-features \
+            --omit blanket-impls,auto-derived-impls > public-api.txt
+      - name: Fail on an unreviewed surface change
+        # The snapshot is committed, so any change to the public API arrives as
+        # a reviewable diff rather than passing unnoticed. Regenerate it with
+        # the command above and commit the result.
+        run: git diff --exit-code -- public-api.txt
+
   deny:
     name: License and advisory policy
     runs-on: ubuntu-latest

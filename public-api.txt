@@ -1,0 +1,921 @@
+pub mod irongall
+pub mod irongall::armor
+#[non_exhaustive] pub enum irongall::armor::ArmorErrorKind
+pub irongall::armor::ArmorErrorKind::CleartextMessage
+pub irongall::armor::ArmorErrorKind::DataAfterPadding
+pub irongall::armor::ArmorErrorKind::ExtraBlock
+pub irongall::armor::ArmorErrorKind::ForbiddenHeader
+pub irongall::armor::ArmorErrorKind::InvalidCharacter
+pub irongall::armor::ArmorErrorKind::InvalidHashHeader
+pub irongall::armor::ArmorErrorKind::InvalidHeader
+pub irongall::armor::ArmorErrorKind::InvalidHeaderLine
+pub irongall::armor::ArmorErrorKind::InvalidPadding
+pub irongall::armor::ArmorErrorKind::InvalidTail
+pub irongall::armor::ArmorErrorKind::MissingSignature
+pub irongall::armor::ArmorErrorKind::MissingTail
+pub irongall::armor::ArmorErrorKind::NoBlock
+pub irongall::armor::ArmorErrorKind::NonCanonicalPadding
+pub irongall::armor::ArmorErrorKind::NotCleartext
+pub irongall::armor::ArmorErrorKind::NotDashEscaped
+pub irongall::armor::ArmorErrorKind::TextAfterChecksum
+pub irongall::armor::ArmorErrorKind::TextOutsideBlock
+pub irongall::armor::ArmorErrorKind::TruncatedData
+pub irongall::armor::ArmorErrorKind::UnknownLabel
+impl core::fmt::Display for irongall::armor::ArmorErrorKind
+pub fn irongall::armor::ArmorErrorKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::armor::ArmorErrorKind
+impl core::marker::Send for irongall::armor::ArmorErrorKind
+impl core::marker::Sync for irongall::armor::ArmorErrorKind
+impl core::marker::Unpin for irongall::armor::ArmorErrorKind
+impl core::marker::UnsafeUnpin for irongall::armor::ArmorErrorKind
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::armor::ArmorErrorKind
+impl core::panic::unwind_safe::UnwindSafe for irongall::armor::ArmorErrorKind
+#[non_exhaustive] pub enum irongall::armor::Label
+pub irongall::armor::Label::Message
+pub irongall::armor::Label::PrivateKey
+pub irongall::armor::Label::PublicKey
+pub irongall::armor::Label::Signature
+impl irongall::armor::Label
+pub const fn irongall::armor::Label::as_str(self) -> &'static str
+impl core::fmt::Display for irongall::armor::Label
+pub fn irongall::armor::Label::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::armor::Label
+impl core::marker::Send for irongall::armor::Label
+impl core::marker::Sync for irongall::armor::Label
+impl core::marker::Unpin for irongall::armor::Label
+impl core::marker::UnsafeUnpin for irongall::armor::Label
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::armor::Label
+impl core::panic::unwind_safe::UnwindSafe for irongall::armor::Label
+pub struct irongall::armor::Armor
+impl irongall::armor::Armor
+pub fn irongall::armor::Armor::data(&self) -> &[u8]
+pub fn irongall::armor::Armor::headers(&self) -> &[irongall::armor::Header]
+pub fn irongall::armor::Armor::into_data(self) -> alloc::vec::Vec<u8>
+pub fn irongall::armor::Armor::label(&self) -> irongall::armor::Label
+impl core::marker::Freeze for irongall::armor::Armor
+impl core::marker::Send for irongall::armor::Armor
+impl core::marker::Sync for irongall::armor::Armor
+impl core::marker::Unpin for irongall::armor::Armor
+impl core::marker::UnsafeUnpin for irongall::armor::Armor
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::armor::Armor
+impl core::panic::unwind_safe::UnwindSafe for irongall::armor::Armor
+pub struct irongall::armor::ArmorError
+impl irongall::armor::ArmorError
+pub fn irongall::armor::ArmorError::kind(&self) -> irongall::armor::ArmorErrorKind
+pub fn irongall::armor::ArmorError::line(&self) -> usize
+impl core::convert::From<irongall::armor::ArmorError> for irongall::document::DocumentError
+pub fn irongall::document::DocumentError::from(irongall::armor::ArmorError) -> irongall::document::DocumentError
+impl core::error::Error for irongall::armor::ArmorError
+impl core::fmt::Display for irongall::armor::ArmorError
+pub fn irongall::armor::ArmorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::armor::ArmorError
+impl core::marker::Send for irongall::armor::ArmorError
+impl core::marker::Sync for irongall::armor::ArmorError
+impl core::marker::Unpin for irongall::armor::ArmorError
+impl core::marker::UnsafeUnpin for irongall::armor::ArmorError
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::armor::ArmorError
+impl core::panic::unwind_safe::UnwindSafe for irongall::armor::ArmorError
+pub struct irongall::armor::Header
+impl irongall::armor::Header
+pub fn irongall::armor::Header::key(&self) -> &str
+pub fn irongall::armor::Header::value(&self) -> &str
+impl core::marker::Freeze for irongall::armor::Header
+impl core::marker::Send for irongall::armor::Header
+impl core::marker::Sync for irongall::armor::Header
+impl core::marker::Unpin for irongall::armor::Header
+impl core::marker::UnsafeUnpin for irongall::armor::Header
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::armor::Header
+impl core::panic::unwind_safe::UnwindSafe for irongall::armor::Header
+pub fn irongall::armor::decode(&[u8]) -> core::result::Result<irongall::armor::Armor, irongall::armor::ArmorError>
+pub fn irongall::armor::decode_all(&[u8]) -> core::result::Result<alloc::vec::Vec<irongall::armor::Armor>, irongall::armor::ArmorError>
+pub mod irongall::cert
+pub struct irongall::cert::Certificate
+impl irongall::cert::Certificate
+pub fn irongall::cert::Certificate::primary(&self) -> &irongall::key::PublicKey
+pub fn irongall::cert::Certificate::primary_signatures(&self) -> &[irongall::signature::Signature]
+pub fn irongall::cert::Certificate::skipped(&self) -> &[irongall::packet::PacketError]
+pub fn irongall::cert::Certificate::subkeys(&self) -> &[irongall::cert::Subkey]
+pub fn irongall::cert::Certificate::user_ids(&self) -> &[irongall::cert::UserId]
+impl core::iter::traits::collect::FromIterator<irongall::cert::Certificate> for irongall::keyring::Keyring
+pub fn irongall::keyring::Keyring::from_iter<I: core::iter::traits::collect::IntoIterator<Item = irongall::cert::Certificate>>(I) -> irongall::keyring::Keyring
+impl core::marker::Freeze for irongall::cert::Certificate
+impl core::marker::Send for irongall::cert::Certificate
+impl core::marker::Sync for irongall::cert::Certificate
+impl core::marker::Unpin for irongall::cert::Certificate
+impl core::marker::UnsafeUnpin for irongall::cert::Certificate
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::cert::Certificate
+impl core::panic::unwind_safe::UnwindSafe for irongall::cert::Certificate
+pub struct irongall::cert::Certificates<'a>
+impl core::iter::traits::iterator::Iterator for irongall::cert::Certificates<'_>
+pub type irongall::cert::Certificates<'_>::Item = core::result::Result<irongall::cert::Certificate, irongall::packet::PacketError>
+pub fn irongall::cert::Certificates<'_>::next(&mut self) -> core::option::Option<Self::Item>
+impl core::iter::traits::marker::FusedIterator for irongall::cert::Certificates<'_>
+impl<'a> core::marker::Freeze for irongall::cert::Certificates<'a>
+impl<'a> core::marker::Send for irongall::cert::Certificates<'a>
+impl<'a> core::marker::Sync for irongall::cert::Certificates<'a>
+impl<'a> core::marker::Unpin for irongall::cert::Certificates<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::cert::Certificates<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::cert::Certificates<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::cert::Certificates<'a>
+pub struct irongall::cert::Subkey
+impl irongall::cert::Subkey
+pub fn irongall::cert::Subkey::key(&self) -> &irongall::key::PublicKey
+pub fn irongall::cert::Subkey::signatures(&self) -> &[irongall::signature::Signature]
+impl core::marker::Freeze for irongall::cert::Subkey
+impl core::marker::Send for irongall::cert::Subkey
+impl core::marker::Sync for irongall::cert::Subkey
+impl core::marker::Unpin for irongall::cert::Subkey
+impl core::marker::UnsafeUnpin for irongall::cert::Subkey
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::cert::Subkey
+impl core::panic::unwind_safe::UnwindSafe for irongall::cert::Subkey
+pub struct irongall::cert::UserId
+impl irongall::cert::UserId
+pub fn irongall::cert::UserId::signatures(&self) -> &[irongall::signature::Signature]
+pub fn irongall::cert::UserId::value(&self) -> &[u8]
+impl core::marker::Freeze for irongall::cert::UserId
+impl core::marker::Send for irongall::cert::UserId
+impl core::marker::Sync for irongall::cert::UserId
+impl core::marker::Unpin for irongall::cert::UserId
+impl core::marker::UnsafeUnpin for irongall::cert::UserId
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::cert::UserId
+impl core::panic::unwind_safe::UnwindSafe for irongall::cert::UserId
+pub fn irongall::cert::certificates(&[u8]) -> irongall::cert::Certificates<'_>
+pub mod irongall::document
+#[non_exhaustive] pub enum irongall::document::DocumentError
+pub irongall::document::DocumentError::Armor(irongall::armor::ArmorError)
+pub irongall::document::DocumentError::Packet(irongall::packet::PacketError)
+impl core::convert::From<irongall::armor::ArmorError> for irongall::document::DocumentError
+pub fn irongall::document::DocumentError::from(irongall::armor::ArmorError) -> irongall::document::DocumentError
+impl core::convert::From<irongall::packet::PacketError> for irongall::document::DocumentError
+pub fn irongall::document::DocumentError::from(irongall::packet::PacketError) -> irongall::document::DocumentError
+impl core::error::Error for irongall::document::DocumentError
+impl core::fmt::Display for irongall::document::DocumentError
+pub fn irongall::document::DocumentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::document::DocumentError
+impl core::marker::Send for irongall::document::DocumentError
+impl core::marker::Sync for irongall::document::DocumentError
+impl core::marker::Unpin for irongall::document::DocumentError
+impl core::marker::UnsafeUnpin for irongall::document::DocumentError
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::document::DocumentError
+impl core::panic::unwind_safe::UnwindSafe for irongall::document::DocumentError
+pub struct irongall::document::Cleartext
+impl irongall::document::Cleartext
+pub fn irongall::document::Cleartext::signatures(&self) -> &[irongall::signature::Signature]
+pub fn irongall::document::Cleartext::skipped(&self) -> &[irongall::packet::PacketError]
+pub fn irongall::document::Cleartext::text(&self) -> &[u8]
+impl core::marker::Freeze for irongall::document::Cleartext
+impl core::marker::Send for irongall::document::Cleartext
+impl core::marker::Sync for irongall::document::Cleartext
+impl core::marker::Unpin for irongall::document::Cleartext
+impl core::marker::UnsafeUnpin for irongall::document::Cleartext
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::document::Cleartext
+impl core::panic::unwind_safe::UnwindSafe for irongall::document::Cleartext
+pub struct irongall::document::Detached
+impl irongall::document::Detached
+pub fn irongall::document::Detached::signatures(&self) -> &[irongall::signature::Signature]
+pub fn irongall::document::Detached::skipped(&self) -> &[irongall::packet::PacketError]
+impl core::marker::Freeze for irongall::document::Detached
+impl core::marker::Send for irongall::document::Detached
+impl core::marker::Sync for irongall::document::Detached
+impl core::marker::Unpin for irongall::document::Detached
+impl core::marker::UnsafeUnpin for irongall::document::Detached
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::document::Detached
+impl core::panic::unwind_safe::UnwindSafe for irongall::document::Detached
+pub fn irongall::document::cleartext(&[u8]) -> core::result::Result<irongall::document::Cleartext, irongall::document::DocumentError>
+pub fn irongall::document::detached(&[u8]) -> core::result::Result<irongall::document::Detached, irongall::document::DocumentError>
+pub mod irongall::hash
+pub struct irongall::hash::HashAlgorithm(_)
+impl irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::MD5: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::RIPEMD160: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::SHA1: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::SHA224: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::SHA256: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::SHA384: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::SHA3_256: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::SHA3_512: irongall::hash::HashAlgorithm
+pub const irongall::hash::HashAlgorithm::SHA512: irongall::hash::HashAlgorithm
+pub const fn irongall::hash::HashAlgorithm::number(self) -> u8
+impl core::fmt::Debug for irongall::hash::HashAlgorithm
+pub fn irongall::hash::HashAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::hash::HashAlgorithm
+pub fn irongall::hash::HashAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::hash::HashAlgorithm
+impl core::marker::Send for irongall::hash::HashAlgorithm
+impl core::marker::Sync for irongall::hash::HashAlgorithm
+impl core::marker::Unpin for irongall::hash::HashAlgorithm
+impl core::marker::UnsafeUnpin for irongall::hash::HashAlgorithm
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::HashAlgorithm
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::HashAlgorithm
+pub struct irongall::hash::Sha1
+impl core::default::Default for irongall::hash::Sha1
+pub fn irongall::hash::Sha1::default() -> irongall::hash::Sha1
+impl irongall::hash::HashFunction for irongall::hash::Sha1
+pub type irongall::hash::Sha1::Output = [u8; 20]
+pub fn irongall::hash::Sha1::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha1::finalize(self) -> [u8; 20]
+pub fn irongall::hash::Sha1::new() -> irongall::hash::Sha1
+pub fn irongall::hash::Sha1::update(&mut self, &[u8])
+impl core::marker::Freeze for irongall::hash::Sha1
+impl core::marker::Send for irongall::hash::Sha1
+impl core::marker::Sync for irongall::hash::Sha1
+impl core::marker::Unpin for irongall::hash::Sha1
+impl core::marker::UnsafeUnpin for irongall::hash::Sha1
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Sha1
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Sha1
+pub struct irongall::hash::Sha224(_)
+impl core::default::Default for irongall::hash::Sha224
+pub fn irongall::hash::Sha224::default() -> irongall::hash::Sha224
+impl irongall::hash::HashFunction for irongall::hash::Sha224
+pub type irongall::hash::Sha224::Output = [u8; 28]
+pub fn irongall::hash::Sha224::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha224::finalize(self) -> [u8; 28]
+pub fn irongall::hash::Sha224::new() -> irongall::hash::Sha224
+pub fn irongall::hash::Sha224::update(&mut self, &[u8])
+impl core::marker::Freeze for irongall::hash::Sha224
+impl core::marker::Send for irongall::hash::Sha224
+impl core::marker::Sync for irongall::hash::Sha224
+impl core::marker::Unpin for irongall::hash::Sha224
+impl core::marker::UnsafeUnpin for irongall::hash::Sha224
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Sha224
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Sha224
+pub struct irongall::hash::Sha256(_)
+impl core::default::Default for irongall::hash::Sha256
+pub fn irongall::hash::Sha256::default() -> irongall::hash::Sha256
+impl irongall::hash::HashFunction for irongall::hash::Sha256
+pub type irongall::hash::Sha256::Output = [u8; 32]
+pub fn irongall::hash::Sha256::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha256::finalize(self) -> [u8; 32]
+pub fn irongall::hash::Sha256::new() -> irongall::hash::Sha256
+pub fn irongall::hash::Sha256::update(&mut self, &[u8])
+impl core::marker::Freeze for irongall::hash::Sha256
+impl core::marker::Send for irongall::hash::Sha256
+impl core::marker::Sync for irongall::hash::Sha256
+impl core::marker::Unpin for irongall::hash::Sha256
+impl core::marker::UnsafeUnpin for irongall::hash::Sha256
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Sha256
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Sha256
+pub struct irongall::hash::Sha384(_)
+impl core::default::Default for irongall::hash::Sha384
+pub fn irongall::hash::Sha384::default() -> irongall::hash::Sha384
+impl irongall::hash::HashFunction for irongall::hash::Sha384
+pub type irongall::hash::Sha384::Output = [u8; 48]
+pub fn irongall::hash::Sha384::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha384::finalize(self) -> [u8; 48]
+pub fn irongall::hash::Sha384::new() -> irongall::hash::Sha384
+pub fn irongall::hash::Sha384::update(&mut self, &[u8])
+impl core::marker::Freeze for irongall::hash::Sha384
+impl core::marker::Send for irongall::hash::Sha384
+impl core::marker::Sync for irongall::hash::Sha384
+impl core::marker::Unpin for irongall::hash::Sha384
+impl core::marker::UnsafeUnpin for irongall::hash::Sha384
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Sha384
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Sha384
+pub struct irongall::hash::Sha3_256(_)
+impl core::default::Default for irongall::hash::Sha3_256
+pub fn irongall::hash::Sha3_256::default() -> irongall::hash::Sha3_256
+impl irongall::hash::HashFunction for irongall::hash::Sha3_256
+pub type irongall::hash::Sha3_256::Output = [u8; 32]
+pub fn irongall::hash::Sha3_256::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha3_256::finalize(self) -> [u8; 32]
+pub fn irongall::hash::Sha3_256::new() -> irongall::hash::Sha3_256
+pub fn irongall::hash::Sha3_256::update(&mut self, &[u8])
+impl core::marker::Freeze for irongall::hash::Sha3_256
+impl core::marker::Send for irongall::hash::Sha3_256
+impl core::marker::Sync for irongall::hash::Sha3_256
+impl core::marker::Unpin for irongall::hash::Sha3_256
+impl core::marker::UnsafeUnpin for irongall::hash::Sha3_256
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Sha3_256
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Sha3_256
+pub struct irongall::hash::Sha3_512(_)
+impl core::default::Default for irongall::hash::Sha3_512
+pub fn irongall::hash::Sha3_512::default() -> irongall::hash::Sha3_512
+impl irongall::hash::HashFunction for irongall::hash::Sha3_512
+pub type irongall::hash::Sha3_512::Output = [u8; 64]
+pub fn irongall::hash::Sha3_512::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha3_512::finalize(self) -> [u8; 64]
+pub fn irongall::hash::Sha3_512::new() -> irongall::hash::Sha3_512
+pub fn irongall::hash::Sha3_512::update(&mut self, &[u8])
+impl core::marker::Freeze for irongall::hash::Sha3_512
+impl core::marker::Send for irongall::hash::Sha3_512
+impl core::marker::Sync for irongall::hash::Sha3_512
+impl core::marker::Unpin for irongall::hash::Sha3_512
+impl core::marker::UnsafeUnpin for irongall::hash::Sha3_512
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Sha3_512
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Sha3_512
+pub struct irongall::hash::Sha512(_)
+impl core::default::Default for irongall::hash::Sha512
+pub fn irongall::hash::Sha512::default() -> irongall::hash::Sha512
+impl irongall::hash::HashFunction for irongall::hash::Sha512
+pub type irongall::hash::Sha512::Output = [u8; 64]
+pub fn irongall::hash::Sha512::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha512::finalize(self) -> [u8; 64]
+pub fn irongall::hash::Sha512::new() -> irongall::hash::Sha512
+pub fn irongall::hash::Sha512::update(&mut self, &[u8])
+impl core::marker::Freeze for irongall::hash::Sha512
+impl core::marker::Send for irongall::hash::Sha512
+impl core::marker::Sync for irongall::hash::Sha512
+impl core::marker::Unpin for irongall::hash::Sha512
+impl core::marker::UnsafeUnpin for irongall::hash::Sha512
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::hash::Sha512
+impl core::panic::unwind_safe::UnwindSafe for irongall::hash::Sha512
+pub trait irongall::hash::HashFunction: core::clone::Clone + irongall::hash::sealed::Sealed
+pub type irongall::hash::HashFunction::Output: core::convert::AsRef<[u8]> + core::marker::Copy
+pub fn irongall::hash::HashFunction::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::HashFunction::finalize(self) -> Self::Output
+pub fn irongall::hash::HashFunction::new() -> Self
+pub fn irongall::hash::HashFunction::update(&mut self, &[u8])
+impl irongall::hash::HashFunction for irongall::hash::Sha1
+pub type irongall::hash::Sha1::Output = [u8; 20]
+pub fn irongall::hash::Sha1::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha1::finalize(self) -> [u8; 20]
+pub fn irongall::hash::Sha1::new() -> irongall::hash::Sha1
+pub fn irongall::hash::Sha1::update(&mut self, &[u8])
+impl irongall::hash::HashFunction for irongall::hash::Sha224
+pub type irongall::hash::Sha224::Output = [u8; 28]
+pub fn irongall::hash::Sha224::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha224::finalize(self) -> [u8; 28]
+pub fn irongall::hash::Sha224::new() -> irongall::hash::Sha224
+pub fn irongall::hash::Sha224::update(&mut self, &[u8])
+impl irongall::hash::HashFunction for irongall::hash::Sha256
+pub type irongall::hash::Sha256::Output = [u8; 32]
+pub fn irongall::hash::Sha256::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha256::finalize(self) -> [u8; 32]
+pub fn irongall::hash::Sha256::new() -> irongall::hash::Sha256
+pub fn irongall::hash::Sha256::update(&mut self, &[u8])
+impl irongall::hash::HashFunction for irongall::hash::Sha384
+pub type irongall::hash::Sha384::Output = [u8; 48]
+pub fn irongall::hash::Sha384::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha384::finalize(self) -> [u8; 48]
+pub fn irongall::hash::Sha384::new() -> irongall::hash::Sha384
+pub fn irongall::hash::Sha384::update(&mut self, &[u8])
+impl irongall::hash::HashFunction for irongall::hash::Sha3_256
+pub type irongall::hash::Sha3_256::Output = [u8; 32]
+pub fn irongall::hash::Sha3_256::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha3_256::finalize(self) -> [u8; 32]
+pub fn irongall::hash::Sha3_256::new() -> irongall::hash::Sha3_256
+pub fn irongall::hash::Sha3_256::update(&mut self, &[u8])
+impl irongall::hash::HashFunction for irongall::hash::Sha3_512
+pub type irongall::hash::Sha3_512::Output = [u8; 64]
+pub fn irongall::hash::Sha3_512::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha3_512::finalize(self) -> [u8; 64]
+pub fn irongall::hash::Sha3_512::new() -> irongall::hash::Sha3_512
+pub fn irongall::hash::Sha3_512::update(&mut self, &[u8])
+impl irongall::hash::HashFunction for irongall::hash::Sha512
+pub type irongall::hash::Sha512::Output = [u8; 64]
+pub fn irongall::hash::Sha512::digest(&[u8]) -> Self::Output
+pub fn irongall::hash::Sha512::finalize(self) -> [u8; 64]
+pub fn irongall::hash::Sha512::new() -> irongall::hash::Sha512
+pub fn irongall::hash::Sha512::update(&mut self, &[u8])
+pub mod irongall::key
+#[non_exhaustive] pub enum irongall::key::Fingerprint
+pub irongall::key::Fingerprint::V4([u8; 20])
+pub irongall::key::Fingerprint::V6([u8; 32])
+impl irongall::key::Fingerprint
+pub fn irongall::key::Fingerprint::as_bytes(&self) -> &[u8]
+pub fn irongall::key::Fingerprint::key_id(&self) -> irongall::key::KeyId
+pub fn irongall::key::Fingerprint::version(&self) -> irongall::packet::Version
+impl core::fmt::Debug for irongall::key::Fingerprint
+pub fn irongall::key::Fingerprint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::key::Fingerprint
+pub fn irongall::key::Fingerprint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::key::Fingerprint
+impl core::marker::Send for irongall::key::Fingerprint
+impl core::marker::Sync for irongall::key::Fingerprint
+impl core::marker::Unpin for irongall::key::Fingerprint
+impl core::marker::UnsafeUnpin for irongall::key::Fingerprint
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::key::Fingerprint
+impl core::panic::unwind_safe::UnwindSafe for irongall::key::Fingerprint
+#[non_exhaustive] pub enum irongall::key::KeyMaterial
+pub irongall::key::KeyMaterial::Ed25519([u8; 32])
+pub irongall::key::KeyMaterial::Opaque
+pub irongall::key::KeyMaterial::Rsa
+pub irongall::key::KeyMaterial::Rsa::exponent: alloc::vec::Vec<u8>
+pub irongall::key::KeyMaterial::Rsa::modulus: alloc::vec::Vec<u8>
+impl core::marker::Freeze for irongall::key::KeyMaterial
+impl core::marker::Send for irongall::key::KeyMaterial
+impl core::marker::Sync for irongall::key::KeyMaterial
+impl core::marker::Unpin for irongall::key::KeyMaterial
+impl core::marker::UnsafeUnpin for irongall::key::KeyMaterial
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::key::KeyMaterial
+impl core::panic::unwind_safe::UnwindSafe for irongall::key::KeyMaterial
+pub struct irongall::key::KeyId(_)
+impl irongall::key::KeyId
+pub const fn irongall::key::KeyId::as_bytes(&self) -> &[u8; 8]
+pub const fn irongall::key::KeyId::from_bytes([u8; 8]) -> irongall::key::KeyId
+impl core::fmt::Debug for irongall::key::KeyId
+pub fn irongall::key::KeyId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::key::KeyId
+pub fn irongall::key::KeyId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::key::KeyId
+impl core::marker::Send for irongall::key::KeyId
+impl core::marker::Sync for irongall::key::KeyId
+impl core::marker::Unpin for irongall::key::KeyId
+impl core::marker::UnsafeUnpin for irongall::key::KeyId
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::key::KeyId
+impl core::panic::unwind_safe::UnwindSafe for irongall::key::KeyId
+pub struct irongall::key::PublicKey
+impl irongall::key::PublicKey
+pub fn irongall::key::PublicKey::algorithm(&self) -> irongall::key::PublicKeyAlgorithm
+pub fn irongall::key::PublicKey::creation_time(&self) -> u32
+pub fn irongall::key::PublicKey::fingerprint(&self) -> irongall::key::Fingerprint
+pub fn irongall::key::PublicKey::from_packet(&irongall::packet::Packet<'_>) -> core::result::Result<irongall::key::PublicKey, irongall::packet::PacketError>
+pub fn irongall::key::PublicKey::key_id(&self) -> irongall::key::KeyId
+pub fn irongall::key::PublicKey::material(&self) -> &irongall::key::KeyMaterial
+pub fn irongall::key::PublicKey::version(&self) -> irongall::packet::Version
+impl core::marker::Freeze for irongall::key::PublicKey
+impl core::marker::Send for irongall::key::PublicKey
+impl core::marker::Sync for irongall::key::PublicKey
+impl core::marker::Unpin for irongall::key::PublicKey
+impl core::marker::UnsafeUnpin for irongall::key::PublicKey
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::key::PublicKey
+impl core::panic::unwind_safe::UnwindSafe for irongall::key::PublicKey
+pub struct irongall::key::PublicKeyAlgorithm(_)
+impl irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::DSA: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::ECDH: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::ECDSA: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::ED25519: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::ED448: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::EDDSA_LEGACY: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::ELGAMAL_ENCRYPT_ONLY: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::RSA: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::RSA_ENCRYPT_ONLY: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::RSA_SIGN_ONLY: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::X25519: irongall::key::PublicKeyAlgorithm
+pub const irongall::key::PublicKeyAlgorithm::X448: irongall::key::PublicKeyAlgorithm
+pub const fn irongall::key::PublicKeyAlgorithm::number(self) -> u8
+impl core::fmt::Debug for irongall::key::PublicKeyAlgorithm
+pub fn irongall::key::PublicKeyAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::key::PublicKeyAlgorithm
+pub fn irongall::key::PublicKeyAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::key::PublicKeyAlgorithm
+impl core::marker::Send for irongall::key::PublicKeyAlgorithm
+impl core::marker::Sync for irongall::key::PublicKeyAlgorithm
+impl core::marker::Unpin for irongall::key::PublicKeyAlgorithm
+impl core::marker::UnsafeUnpin for irongall::key::PublicKeyAlgorithm
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::key::PublicKeyAlgorithm
+impl core::panic::unwind_safe::UnwindSafe for irongall::key::PublicKeyAlgorithm
+pub mod irongall::keyring
+pub struct irongall::keyring::Keyring
+impl irongall::keyring::Keyring
+pub fn irongall::keyring::Keyring::certificates(&self) -> &[irongall::cert::Certificate]
+pub fn irongall::keyring::Keyring::new(impl core::iter::traits::collect::IntoIterator<Item = irongall::cert::Certificate>) -> irongall::keyring::Keyring
+pub fn irongall::keyring::Keyring::verify<'a>(&'a self, &irongall::policy::Policy, u64, &'a [irongall::signature::Signature], &[u8]) -> core::result::Result<irongall::keyring::Verified<'a>, irongall::keyring::Refusal>
+pub fn irongall::keyring::Keyring::verify_hashed<'a>(&'a self, &irongall::policy::Policy, u64, &[irongall::signature::DocumentHash<'a>]) -> core::result::Result<irongall::keyring::Verified<'a>, irongall::keyring::Refusal>
+impl core::iter::traits::collect::FromIterator<irongall::cert::Certificate> for irongall::keyring::Keyring
+pub fn irongall::keyring::Keyring::from_iter<I: core::iter::traits::collect::IntoIterator<Item = irongall::cert::Certificate>>(I) -> irongall::keyring::Keyring
+impl core::marker::Freeze for irongall::keyring::Keyring
+impl core::marker::Send for irongall::keyring::Keyring
+impl core::marker::Sync for irongall::keyring::Keyring
+impl core::marker::Unpin for irongall::keyring::Keyring
+impl core::marker::UnsafeUnpin for irongall::keyring::Keyring
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::keyring::Keyring
+impl core::panic::unwind_safe::UnwindSafe for irongall::keyring::Keyring
+pub struct irongall::keyring::Refusal
+impl irongall::keyring::Refusal
+pub fn irongall::keyring::Refusal::certificate(&self) -> core::option::Option<irongall::key::Fingerprint>
+pub fn irongall::keyring::Refusal::key(&self) -> core::option::Option<irongall::key::Fingerprint>
+pub fn irongall::keyring::Refusal::reason(&self) -> irongall::policy::Reason
+impl core::error::Error for irongall::keyring::Refusal
+impl core::fmt::Display for irongall::keyring::Refusal
+pub fn irongall::keyring::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::keyring::Refusal
+impl core::marker::Send for irongall::keyring::Refusal
+impl core::marker::Sync for irongall::keyring::Refusal
+impl core::marker::Unpin for irongall::keyring::Refusal
+impl core::marker::UnsafeUnpin for irongall::keyring::Refusal
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::keyring::Refusal
+impl core::panic::unwind_safe::UnwindSafe for irongall::keyring::Refusal
+pub struct irongall::keyring::Verified<'a>
+impl<'a> irongall::keyring::Verified<'a>
+pub fn irongall::keyring::Verified<'a>::certificate(&self) -> &'a irongall::cert::Certificate
+pub fn irongall::keyring::Verified<'a>::key(&self) -> &'a irongall::key::PublicKey
+pub fn irongall::keyring::Verified<'a>::signature(&self) -> &'a irongall::signature::Signature
+impl<'a> core::marker::Freeze for irongall::keyring::Verified<'a>
+impl<'a> core::marker::Send for irongall::keyring::Verified<'a>
+impl<'a> core::marker::Sync for irongall::keyring::Verified<'a>
+impl<'a> core::marker::Unpin for irongall::keyring::Verified<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::keyring::Verified<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::keyring::Verified<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::keyring::Verified<'a>
+pub mod irongall::packet
+#[non_exhaustive] pub enum irongall::packet::PacketErrorKind
+pub irongall::packet::PacketErrorKind::CriticalSubpacket
+pub irongall::packet::PacketErrorKind::IndeterminateLength
+pub irongall::packet::PacketErrorKind::InvalidHeader
+pub irongall::packet::PacketErrorKind::InvalidMaterial
+pub irongall::packet::PacketErrorKind::InvalidMpi
+pub irongall::packet::PacketErrorKind::InvalidSubpacket
+pub irongall::packet::PacketErrorKind::KeyTooLong
+pub irongall::packet::PacketErrorKind::MaterialLength
+pub irongall::packet::PacketErrorKind::MisplacedSignature
+pub irongall::packet::PacketErrorKind::MissingCreationTime
+pub irongall::packet::PacketErrorKind::PartialBodyLength
+pub irongall::packet::PacketErrorKind::ReservedType
+pub irongall::packet::PacketErrorKind::SaltSize
+pub irongall::packet::PacketErrorKind::SubkeyVersion
+pub irongall::packet::PacketErrorKind::TrailingData
+pub irongall::packet::PacketErrorKind::Truncated
+pub irongall::packet::PacketErrorKind::TruncatedBody
+pub irongall::packet::PacketErrorKind::UnexpectedType
+pub irongall::packet::PacketErrorKind::UnsupportedVersion
+pub irongall::packet::PacketErrorKind::UserIdTooLong
+impl core::fmt::Display for irongall::packet::PacketErrorKind
+pub fn irongall::packet::PacketErrorKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::packet::PacketErrorKind
+impl core::marker::Send for irongall::packet::PacketErrorKind
+impl core::marker::Sync for irongall::packet::PacketErrorKind
+impl core::marker::Unpin for irongall::packet::PacketErrorKind
+impl core::marker::UnsafeUnpin for irongall::packet::PacketErrorKind
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::packet::PacketErrorKind
+impl core::panic::unwind_safe::UnwindSafe for irongall::packet::PacketErrorKind
+#[non_exhaustive] pub enum irongall::packet::Version
+pub irongall::packet::Version::V4
+pub irongall::packet::Version::V6
+impl core::marker::Freeze for irongall::packet::Version
+impl core::marker::Send for irongall::packet::Version
+impl core::marker::Sync for irongall::packet::Version
+impl core::marker::Unpin for irongall::packet::Version
+impl core::marker::UnsafeUnpin for irongall::packet::Version
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::packet::Version
+impl core::panic::unwind_safe::UnwindSafe for irongall::packet::Version
+pub struct irongall::packet::Packet<'a>
+impl<'a> irongall::packet::Packet<'a>
+pub fn irongall::packet::Packet<'a>::body(&self) -> &'a [u8]
+pub fn irongall::packet::Packet<'a>::offset(&self) -> usize
+pub fn irongall::packet::Packet<'a>::tag(&self) -> irongall::packet::Tag
+impl<'a> core::marker::Freeze for irongall::packet::Packet<'a>
+impl<'a> core::marker::Send for irongall::packet::Packet<'a>
+impl<'a> core::marker::Sync for irongall::packet::Packet<'a>
+impl<'a> core::marker::Unpin for irongall::packet::Packet<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::packet::Packet<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::packet::Packet<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::packet::Packet<'a>
+pub struct irongall::packet::PacketError
+impl irongall::packet::PacketError
+pub fn irongall::packet::PacketError::kind(&self) -> irongall::packet::PacketErrorKind
+pub fn irongall::packet::PacketError::offset(&self) -> usize
+pub fn irongall::packet::PacketError::tag(&self) -> core::option::Option<irongall::packet::Tag>
+impl core::convert::From<irongall::packet::PacketError> for irongall::document::DocumentError
+pub fn irongall::document::DocumentError::from(irongall::packet::PacketError) -> irongall::document::DocumentError
+impl core::error::Error for irongall::packet::PacketError
+impl core::fmt::Display for irongall::packet::PacketError
+pub fn irongall::packet::PacketError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::packet::PacketError
+impl core::marker::Send for irongall::packet::PacketError
+impl core::marker::Sync for irongall::packet::PacketError
+impl core::marker::Unpin for irongall::packet::PacketError
+impl core::marker::UnsafeUnpin for irongall::packet::PacketError
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::packet::PacketError
+impl core::panic::unwind_safe::UnwindSafe for irongall::packet::PacketError
+pub struct irongall::packet::Packets<'a>
+impl core::iter::traits::marker::FusedIterator for irongall::packet::Packets<'_>
+impl<'a> core::iter::traits::iterator::Iterator for irongall::packet::Packets<'a>
+pub type irongall::packet::Packets<'a>::Item = core::result::Result<irongall::packet::Packet<'a>, irongall::packet::PacketError>
+pub fn irongall::packet::Packets<'a>::next(&mut self) -> core::option::Option<Self::Item>
+impl<'a> core::marker::Freeze for irongall::packet::Packets<'a>
+impl<'a> core::marker::Send for irongall::packet::Packets<'a>
+impl<'a> core::marker::Sync for irongall::packet::Packets<'a>
+impl<'a> core::marker::Unpin for irongall::packet::Packets<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::packet::Packets<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::packet::Packets<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::packet::Packets<'a>
+pub struct irongall::packet::Tag(_)
+impl irongall::packet::Tag
+pub const irongall::packet::Tag::COMPRESSED_DATA: irongall::packet::Tag
+pub const irongall::packet::Tag::LITERAL_DATA: irongall::packet::Tag
+pub const irongall::packet::Tag::MARKER: irongall::packet::Tag
+pub const irongall::packet::Tag::ONE_PASS_SIGNATURE: irongall::packet::Tag
+pub const irongall::packet::Tag::PADDING: irongall::packet::Tag
+pub const irongall::packet::Tag::PUBLIC_KEY: irongall::packet::Tag
+pub const irongall::packet::Tag::PUBLIC_KEY_ENCRYPTED_SESSION_KEY: irongall::packet::Tag
+pub const irongall::packet::Tag::PUBLIC_SUBKEY: irongall::packet::Tag
+pub const irongall::packet::Tag::SECRET_KEY: irongall::packet::Tag
+pub const irongall::packet::Tag::SECRET_SUBKEY: irongall::packet::Tag
+pub const irongall::packet::Tag::SIGNATURE: irongall::packet::Tag
+pub const irongall::packet::Tag::SYMMETRICALLY_ENCRYPTED_DATA: irongall::packet::Tag
+pub const irongall::packet::Tag::SYMMETRICALLY_ENCRYPTED_INTEGRITY_PROTECTED_DATA: irongall::packet::Tag
+pub const irongall::packet::Tag::SYMMETRIC_KEY_ENCRYPTED_SESSION_KEY: irongall::packet::Tag
+pub const irongall::packet::Tag::TRUST: irongall::packet::Tag
+pub const irongall::packet::Tag::USER_ATTRIBUTE: irongall::packet::Tag
+pub const irongall::packet::Tag::USER_ID: irongall::packet::Tag
+pub const fn irongall::packet::Tag::number(self) -> u8
+impl irongall::packet::Tag
+pub const fn irongall::packet::Tag::is_critical(self) -> bool
+impl core::fmt::Debug for irongall::packet::Tag
+pub fn irongall::packet::Tag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::packet::Tag
+pub fn irongall::packet::Tag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::packet::Tag
+impl core::marker::Send for irongall::packet::Tag
+impl core::marker::Sync for irongall::packet::Tag
+impl core::marker::Unpin for irongall::packet::Tag
+impl core::marker::UnsafeUnpin for irongall::packet::Tag
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::packet::Tag
+impl core::panic::unwind_safe::UnwindSafe for irongall::packet::Tag
+pub fn irongall::packet::packets(&[u8]) -> irongall::packet::Packets<'_>
+pub mod irongall::policy
+#[non_exhaustive] pub enum irongall::policy::Reason
+pub irongall::policy::Reason::AfterKeyExpiration
+pub irongall::policy::Reason::BeforeKeyCreation
+pub irongall::policy::Reason::CertificateRevoked
+pub irongall::policy::Reason::KeyExpired
+pub irongall::policy::Reason::MissingBackSignature
+pub irongall::policy::Reason::MissingDirectKeySignature
+pub irongall::policy::Reason::MissingSelfSignature
+pub irongall::policy::Reason::Postdated
+pub irongall::policy::Reason::PrimaryMayNotSign
+pub irongall::policy::Reason::SignatureExpired
+pub irongall::policy::Reason::SubkeyMayNotSign
+pub irongall::policy::Reason::SubkeyRevoked
+pub irongall::policy::Reason::TextSignature
+pub irongall::policy::Reason::TooManySignatures
+pub irongall::policy::Reason::UnboundSubkey
+pub irongall::policy::Reason::UnhonoredBinding
+pub irongall::policy::Reason::UnhonoredSelfSignature
+pub irongall::policy::Reason::UnsupportedKey
+pub irongall::policy::Reason::Unverified
+pub irongall::policy::Reason::WeakBinding
+pub irongall::policy::Reason::WeakHash
+pub irongall::policy::Reason::WeakPrimaryKey
+pub irongall::policy::Reason::WeakSelfSignature
+pub irongall::policy::Reason::WeakSubkey
+impl core::fmt::Display for irongall::policy::Reason
+pub fn irongall::policy::Reason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::policy::Reason
+impl core::marker::Send for irongall::policy::Reason
+impl core::marker::Sync for irongall::policy::Reason
+impl core::marker::Unpin for irongall::policy::Reason
+impl core::marker::UnsafeUnpin for irongall::policy::Reason
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::policy::Reason
+impl core::panic::unwind_safe::UnwindSafe for irongall::policy::Reason
+pub struct irongall::policy::Authority<'a>
+impl<'a> irongall::policy::Authority<'a>
+pub fn irongall::policy::Authority<'a>::certificate(&self) -> &'a irongall::cert::Certificate
+pub fn irongall::policy::Authority<'a>::lapse(&self) -> core::result::Result<core::option::Option<u64>, irongall::policy::Reason>
+pub fn irongall::policy::Authority<'a>::new(&'a irongall::cert::Certificate, &irongall::policy::Policy, u64) -> irongall::policy::Authority<'a>
+pub fn irongall::policy::Authority<'a>::primary_user_id(&self) -> core::option::Option<&'a irongall::cert::UserId>
+pub fn irongall::policy::Authority<'a>::signers(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&'a irongall::key::PublicKey, core::result::Result<irongall::policy::Window, irongall::policy::Reason>)> + '_
+impl<'a> core::marker::Freeze for irongall::policy::Authority<'a>
+impl<'a> core::marker::Send for irongall::policy::Authority<'a>
+impl<'a> core::marker::Sync for irongall::policy::Authority<'a>
+impl<'a> core::marker::Unpin for irongall::policy::Authority<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::policy::Authority<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::policy::Authority<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::policy::Authority<'a>
+pub struct irongall::policy::Policy
+impl irongall::policy::Policy
+pub fn irongall::policy::Policy::accepts_hash(&self, irongall::hash::HashAlgorithm) -> bool
+pub fn irongall::policy::Policy::accepts_key(&self, &irongall::key::PublicKey) -> bool
+pub fn irongall::policy::Policy::accepts_text_signatures(&self) -> bool
+pub fn irongall::policy::Policy::clock_skew(&self) -> u64
+pub fn irongall::policy::Policy::max_signatures(&self) -> usize
+pub fn irongall::policy::Policy::new() -> irongall::policy::Policy
+pub fn irongall::policy::Policy::requires_fresh_signatures(&self) -> bool
+pub fn irongall::policy::Policy::rsa_minimum_bits(&self) -> usize
+pub fn irongall::policy::Policy::with_clock_skew(self, u64) -> irongall::policy::Policy
+pub fn irongall::policy::Policy::with_fresh_signatures(self, bool) -> irongall::policy::Policy
+pub fn irongall::policy::Policy::with_hash(self, irongall::hash::HashAlgorithm, bool) -> irongall::policy::Policy
+pub fn irongall::policy::Policy::with_max_signatures(self, usize) -> irongall::policy::Policy
+pub fn irongall::policy::Policy::with_rsa_minimum_bits(self, usize) -> irongall::policy::Policy
+pub fn irongall::policy::Policy::with_text_signatures(self, bool) -> irongall::policy::Policy
+impl core::default::Default for irongall::policy::Policy
+pub fn irongall::policy::Policy::default() -> irongall::policy::Policy
+impl core::marker::Freeze for irongall::policy::Policy
+impl core::marker::Send for irongall::policy::Policy
+impl core::marker::Sync for irongall::policy::Policy
+impl core::marker::Unpin for irongall::policy::Policy
+impl core::marker::UnsafeUnpin for irongall::policy::Policy
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::policy::Policy
+impl core::panic::unwind_safe::UnwindSafe for irongall::policy::Policy
+pub struct irongall::policy::Window
+impl irongall::policy::Window
+pub fn irongall::policy::Window::contains(&self, u64) -> bool
+pub fn irongall::policy::Window::created(&self) -> u32
+pub fn irongall::policy::Window::expires(&self) -> core::option::Option<u64>
+impl core::marker::Freeze for irongall::policy::Window
+impl core::marker::Send for irongall::policy::Window
+impl core::marker::Sync for irongall::policy::Window
+impl core::marker::Unpin for irongall::policy::Window
+impl core::marker::UnsafeUnpin for irongall::policy::Window
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::policy::Window
+impl core::panic::unwind_safe::UnwindSafe for irongall::policy::Window
+pub mod irongall::signature
+#[non_exhaustive] pub enum irongall::signature::SignatureMaterial
+pub irongall::signature::SignatureMaterial::Ed25519([u8; 64])
+pub irongall::signature::SignatureMaterial::Opaque
+pub irongall::signature::SignatureMaterial::Rsa(alloc::vec::Vec<u8>)
+impl core::marker::Freeze for irongall::signature::SignatureMaterial
+impl core::marker::Send for irongall::signature::SignatureMaterial
+impl core::marker::Sync for irongall::signature::SignatureMaterial
+impl core::marker::Unpin for irongall::signature::SignatureMaterial
+impl core::marker::UnsafeUnpin for irongall::signature::SignatureMaterial
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::SignatureMaterial
+impl core::panic::unwind_safe::UnwindSafe for irongall::signature::SignatureMaterial
+#[non_exhaustive] pub enum irongall::signature::Subject<'a>
+pub irongall::signature::Subject::Document(&'a [u8])
+pub irongall::signature::Subject::Key(&'a irongall::key::PublicKey)
+pub irongall::signature::Subject::Subkey
+pub irongall::signature::Subject::Subkey::primary: &'a irongall::key::PublicKey
+pub irongall::signature::Subject::Subkey::subkey: &'a irongall::key::PublicKey
+pub irongall::signature::Subject::UserId
+pub irongall::signature::Subject::UserId::key: &'a irongall::key::PublicKey
+pub irongall::signature::Subject::UserId::user_id: &'a [u8]
+impl<'a> core::marker::Freeze for irongall::signature::Subject<'a>
+impl<'a> core::marker::Send for irongall::signature::Subject<'a>
+impl<'a> core::marker::Sync for irongall::signature::Subject<'a>
+impl<'a> core::marker::Unpin for irongall::signature::Subject<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::signature::Subject<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::signature::Subject<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::signature::Subject<'a>
+#[non_exhaustive] pub enum irongall::signature::VerifyError
+pub irongall::signature::VerifyError::AlgorithmMismatch
+pub irongall::signature::VerifyError::BadSignature
+pub irongall::signature::VerifyError::ExponentTooLarge
+pub irongall::signature::VerifyError::HashPrefixMismatch
+pub irongall::signature::VerifyError::HashTooShort
+pub irongall::signature::VerifyError::InvalidKey
+pub irongall::signature::VerifyError::ModulusTooLong
+pub irongall::signature::VerifyError::ModulusTooShort
+pub irongall::signature::VerifyError::UnsupportedAlgorithm
+pub irongall::signature::VerifyError::UnsupportedHash
+pub irongall::signature::VerifyError::UnsupportedType
+pub irongall::signature::VerifyError::VersionMismatch
+pub irongall::signature::VerifyError::WrongSubject
+impl core::error::Error for irongall::signature::VerifyError
+impl core::fmt::Display for irongall::signature::VerifyError
+pub fn irongall::signature::VerifyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::signature::VerifyError
+impl core::marker::Send for irongall::signature::VerifyError
+impl core::marker::Sync for irongall::signature::VerifyError
+impl core::marker::Unpin for irongall::signature::VerifyError
+impl core::marker::UnsafeUnpin for irongall::signature::VerifyError
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::VerifyError
+impl core::panic::unwind_safe::UnwindSafe for irongall::signature::VerifyError
+pub struct irongall::signature::DocumentHash<'a>
+impl<'a> irongall::signature::DocumentHash<'a>
+pub fn irongall::signature::DocumentHash<'a>::signature(&self) -> &'a irongall::signature::Signature
+pub fn irongall::signature::DocumentHash<'a>::update(&mut self, &[u8])
+pub fn irongall::signature::DocumentHash<'a>::verify(&self, &irongall::key::PublicKey) -> core::result::Result<(), irongall::signature::VerifyError>
+impl<'a> core::marker::Freeze for irongall::signature::DocumentHash<'a>
+impl<'a> core::marker::Send for irongall::signature::DocumentHash<'a>
+impl<'a> core::marker::Sync for irongall::signature::DocumentHash<'a>
+impl<'a> core::marker::Unpin for irongall::signature::DocumentHash<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::signature::DocumentHash<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::signature::DocumentHash<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::signature::DocumentHash<'a>
+pub struct irongall::signature::KeyFlags<'a>(_)
+impl<'a> irongall::signature::KeyFlags<'a>
+pub fn irongall::signature::KeyFlags<'a>::as_bytes(&self) -> &'a [u8]
+pub fn irongall::signature::KeyFlags<'a>::may_certify(&self) -> bool
+pub fn irongall::signature::KeyFlags<'a>::may_sign(&self) -> bool
+impl<'a> core::marker::Freeze for irongall::signature::KeyFlags<'a>
+impl<'a> core::marker::Send for irongall::signature::KeyFlags<'a>
+impl<'a> core::marker::Sync for irongall::signature::KeyFlags<'a>
+impl<'a> core::marker::Unpin for irongall::signature::KeyFlags<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::signature::KeyFlags<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::signature::KeyFlags<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::signature::KeyFlags<'a>
+pub struct irongall::signature::RevocationCode(_)
+impl irongall::signature::RevocationCode
+pub const irongall::signature::RevocationCode::KEY_COMPROMISED: irongall::signature::RevocationCode
+pub const irongall::signature::RevocationCode::KEY_RETIRED: irongall::signature::RevocationCode
+pub const irongall::signature::RevocationCode::KEY_SUPERSEDED: irongall::signature::RevocationCode
+pub const irongall::signature::RevocationCode::NO_REASON: irongall::signature::RevocationCode
+pub const irongall::signature::RevocationCode::USER_ID_INVALID: irongall::signature::RevocationCode
+pub const fn irongall::signature::RevocationCode::number(self) -> u8
+impl core::fmt::Debug for irongall::signature::RevocationCode
+pub fn irongall::signature::RevocationCode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::signature::RevocationCode
+pub fn irongall::signature::RevocationCode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::signature::RevocationCode
+impl core::marker::Send for irongall::signature::RevocationCode
+impl core::marker::Sync for irongall::signature::RevocationCode
+impl core::marker::Unpin for irongall::signature::RevocationCode
+impl core::marker::UnsafeUnpin for irongall::signature::RevocationCode
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::RevocationCode
+impl core::panic::unwind_safe::UnwindSafe for irongall::signature::RevocationCode
+pub struct irongall::signature::RevocationReason<'a>
+impl<'a> irongall::signature::RevocationReason<'a>
+pub fn irongall::signature::RevocationReason<'a>::code(&self) -> irongall::signature::RevocationCode
+pub fn irongall::signature::RevocationReason<'a>::message(&self) -> &'a [u8]
+impl<'a> core::marker::Freeze for irongall::signature::RevocationReason<'a>
+impl<'a> core::marker::Send for irongall::signature::RevocationReason<'a>
+impl<'a> core::marker::Sync for irongall::signature::RevocationReason<'a>
+impl<'a> core::marker::Unpin for irongall::signature::RevocationReason<'a>
+impl<'a> core::marker::UnsafeUnpin for irongall::signature::RevocationReason<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::signature::RevocationReason<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::signature::RevocationReason<'a>
+pub struct irongall::signature::Signature
+impl irongall::signature::Signature
+pub fn irongall::signature::Signature::creation_time(&self) -> u32
+pub fn irongall::signature::Signature::embedded_signatures(&self) -> &[irongall::signature::Signature]
+pub fn irongall::signature::Signature::expiration_time(&self) -> core::option::Option<u32>
+pub fn irongall::signature::Signature::from_packet(&irongall::packet::Packet<'_>) -> core::result::Result<irongall::signature::Signature, irongall::packet::PacketError>
+pub fn irongall::signature::Signature::hash_algorithm(&self) -> irongall::hash::HashAlgorithm
+pub fn irongall::signature::Signature::hash_prefix(&self) -> [u8; 2]
+pub fn irongall::signature::Signature::hashed_subpackets(&self) -> &[irongall::signature::Subpacket]
+pub fn irongall::signature::Signature::is_primary_user_id(&self) -> bool
+pub fn irongall::signature::Signature::issuer_fingerprints(&self) -> impl core::iter::traits::iterator::Iterator<Item = irongall::key::Fingerprint> + '_
+pub fn irongall::signature::Signature::issuer_key_ids(&self) -> impl core::iter::traits::iterator::Iterator<Item = irongall::key::KeyId> + '_
+pub fn irongall::signature::Signature::key_expiration_time(&self) -> core::option::Option<u32>
+pub fn irongall::signature::Signature::key_flags(&self) -> core::option::Option<irongall::signature::KeyFlags<'_>>
+pub fn irongall::signature::Signature::material(&self) -> &irongall::signature::SignatureMaterial
+pub fn irongall::signature::Signature::public_key_algorithm(&self) -> irongall::key::PublicKeyAlgorithm
+pub fn irongall::signature::Signature::revocation_reason(&self) -> core::option::Option<irongall::signature::RevocationReason<'_>>
+pub fn irongall::signature::Signature::salt(&self) -> &[u8]
+pub fn irongall::signature::Signature::signature_type(&self) -> irongall::signature::SignatureType
+pub fn irongall::signature::Signature::unhashed_subpackets(&self) -> &[irongall::signature::Subpacket]
+pub fn irongall::signature::Signature::version(&self) -> irongall::packet::Version
+impl irongall::signature::Signature
+pub fn irongall::signature::Signature::document_hash(&self) -> core::result::Result<irongall::signature::DocumentHash<'_>, irongall::signature::VerifyError>
+pub fn irongall::signature::Signature::verify(&self, &irongall::key::PublicKey, irongall::signature::Subject<'_>) -> core::result::Result<(), irongall::signature::VerifyError>
+impl core::marker::Freeze for irongall::signature::Signature
+impl core::marker::Send for irongall::signature::Signature
+impl core::marker::Sync for irongall::signature::Signature
+impl core::marker::Unpin for irongall::signature::Signature
+impl core::marker::UnsafeUnpin for irongall::signature::Signature
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::Signature
+impl core::panic::unwind_safe::UnwindSafe for irongall::signature::Signature
+pub struct irongall::signature::SignatureType(_)
+impl irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::BINARY: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::CASUAL_CERTIFICATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::CERTIFICATION_REVOCATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::DIRECT_KEY: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::GENERIC_CERTIFICATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::KEY_REVOCATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::PERSONA_CERTIFICATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::POSITIVE_CERTIFICATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::PRIMARY_KEY_BINDING: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::STANDALONE: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::SUBKEY_BINDING: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::SUBKEY_REVOCATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::TEXT: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::THIRD_PARTY_CONFIRMATION: irongall::signature::SignatureType
+pub const irongall::signature::SignatureType::TIMESTAMP: irongall::signature::SignatureType
+pub const fn irongall::signature::SignatureType::number(self) -> u8
+impl core::fmt::Debug for irongall::signature::SignatureType
+pub fn irongall::signature::SignatureType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::signature::SignatureType
+pub fn irongall::signature::SignatureType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::signature::SignatureType
+impl core::marker::Send for irongall::signature::SignatureType
+impl core::marker::Sync for irongall::signature::SignatureType
+impl core::marker::Unpin for irongall::signature::SignatureType
+impl core::marker::UnsafeUnpin for irongall::signature::SignatureType
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::SignatureType
+impl core::panic::unwind_safe::UnwindSafe for irongall::signature::SignatureType
+pub struct irongall::signature::Subpacket
+impl irongall::signature::Subpacket
+pub fn irongall::signature::Subpacket::body(&self) -> &[u8]
+pub fn irongall::signature::Subpacket::is_critical(&self) -> bool
+pub fn irongall::signature::Subpacket::subpacket_type(&self) -> irongall::signature::SubpacketType
+impl core::marker::Freeze for irongall::signature::Subpacket
+impl core::marker::Send for irongall::signature::Subpacket
+impl core::marker::Sync for irongall::signature::Subpacket
+impl core::marker::Unpin for irongall::signature::Subpacket
+impl core::marker::UnsafeUnpin for irongall::signature::Subpacket
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::Subpacket
+impl core::panic::unwind_safe::UnwindSafe for irongall::signature::Subpacket
+pub struct irongall::signature::SubpacketType(_)
+impl irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::EMBEDDED_SIGNATURE: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::EXPORTABLE_CERTIFICATION: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::FEATURES: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::INTENDED_RECIPIENT_FINGERPRINT: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::ISSUER_FINGERPRINT: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::ISSUER_KEY_ID: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::KEY_EXPIRATION_TIME: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::KEY_FLAGS: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::KEY_SERVER_PREFERENCES: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::NOTATION_DATA: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::POLICY_URI: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::PREFERRED_AEAD_CIPHERSUITES: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::PREFERRED_COMPRESSION_ALGORITHMS: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::PREFERRED_HASH_ALGORITHMS: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::PREFERRED_KEY_SERVER: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::PREFERRED_SYMMETRIC_CIPHERS: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::PRIMARY_USER_ID: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::REASON_FOR_REVOCATION: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::REGULAR_EXPRESSION: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::REVOCABLE: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::REVOCATION_KEY: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::SIGNATURE_CREATION_TIME: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::SIGNATURE_EXPIRATION_TIME: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::SIGNATURE_TARGET: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::SIGNERS_USER_ID: irongall::signature::SubpacketType
+pub const irongall::signature::SubpacketType::TRUST_SIGNATURE: irongall::signature::SubpacketType
+pub const fn irongall::signature::SubpacketType::number(self) -> u8
+impl core::fmt::Debug for irongall::signature::SubpacketType
+pub fn irongall::signature::SubpacketType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for irongall::signature::SubpacketType
+pub fn irongall::signature::SubpacketType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for irongall::signature::SubpacketType
+impl core::marker::Send for irongall::signature::SubpacketType
+impl core::marker::Sync for irongall::signature::SubpacketType
+impl core::marker::Unpin for irongall::signature::SubpacketType
+impl core::marker::UnsafeUnpin for irongall::signature::SubpacketType
+impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::SubpacketType
+impl core::panic::unwind_safe::UnwindSafe for irongall::signature::SubpacketType

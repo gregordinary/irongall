@@ -26,15 +26,20 @@ unreachable_pub = "warn"
 # them with: seeded randomness for rPGP's keys, and the `rsa` crate rPGP's RSA
 # keys are made of. None of them is reachable from the library.
 [dev-dependencies]
-base64 = "0.22"
+# The scalar engine is the reference. The SIMD engines the default features add
+# are left out, since no test reads through them.
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+# rPGP's version. The differential tests read through it where rPGP's Ed25519
+# verification departs from irongall's, so it moves when rPGP's does.
 ed25519-dalek = { version = "2.2", default-features = false }
-num-bigint = "0.4"
+num-bigint = "0.5"
 pgp = { version = "0.21", default-features = false }
+# rPGP generates keys and signs through `rand_core` 0.6, which this implements.
 rand_chacha = "0.3"
 rsa = { version = "0.9", default-features = false }
 sha1 = "0.11"
 sha2 = "0.11"
-sha3 = "0.11"
+sha3 = "0.12"
 
 # Unoptimized, the RSA test vectors take ten seconds; lightly optimized, the
 # whole suite takes under one. Overflow checks and debug assertions stay on.

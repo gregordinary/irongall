@@ -70,9 +70,12 @@
 //! that names as its issuer a key in the keyring irongall does not verify
 //! with, such as a DSA key, and otherwise that nothing verified.
 //!
-//! Each signature is hashed over the document once, however many keys it is
-//! tried with, and a certificate's own signatures are verified only once one
-//! of its keys has made a signature on the document.
+//! Each signature is hashed once, over the document and its own hashed
+//! fields, however many keys it is tried with, and the issuers it names are
+//! gathered once, so that the work of trying it grows with the keys tried
+//! and with the signature, not with the two multiplied. A certificate's own
+//! signatures are verified only once one of its keys has made a signature on
+//! the document.
 
 #[cfg(test)]
 mod tests;
@@ -81,7 +84,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::cert::{self, Certificate};
-use crate::key::{Fingerprint, PublicKey};
+use crate::key::{Fingerprint, KeyId, PublicKey};
 use crate::policy::{self, Authority, Policy, Reason};
 use crate::signature::{DocumentHash, Signature};
 
@@ -176,17 +179,19 @@ impl Keyring {
         let mut unsupported = None;
         for hash in hashes {
             let signature = hash.signature();
+            let issuers = Issuers::of(signature);
+            let mut checks = hash.checks();
             for (certificate, authority) in self.certificates.iter().zip(&mut authorities) {
                 for (index, key) in policy::keys(certificate).enumerate() {
-                    if !may_be_by(signature, key) {
+                    if !issuers.may_be_by(key) {
                         continue;
                     }
                     // Which key made the signature is the equation's to say,
                     // so one over a hash too short for its key's algorithm
                     // is refused by the policy for its hash, not passed over
                     // as unverified.
-                    if let Err(error) = hash.made_by(key) {
-                        if error.is_key_error() && names(signature, key) {
+                    if let Err(error) = checks.made_by(key) {
+                        if error.is_key_error() && issuers.name(key) {
                             unsupported.get_or_insert(Refusal::by(
                                 Reason::UnsupportedKey,
                                 certificate,
@@ -229,45 +234,50 @@ impl FromIterator<Certificate> for Keyring {
     }
 }
 
-/// Whether `signature` may have been made by `key`, as the issuers it names
-/// say: those naming `key`, and those naming no issuer at all.
-///
-/// An issuer is a hint, and an unhashed one can be changed by anyone, so this
-/// only decides which keys a signature over a document is tried with. Trying
-/// one that is named wrongly costs a failed verification, and passing over
-/// one that is named wrongly loses nothing that removing the signature would
-/// not, since a document's signature can only be accepted. A certificate's
-/// own signatures, which can restrict what it grants, are each verified with
-/// the key that would have made them whatever issuer they name (see the
-/// [`policy`] module).
-fn may_be_by(signature: &Signature, key: &PublicKey) -> bool {
-    issued_by(signature, key).is_none_or(|named| named)
+/// The issuers a signature over a document names, in either area, gathered
+/// once and sorted, so that each key in the keyring is looked up among them
+/// rather than compared with each in turn: a signature may name as many as
+/// its packet holds, and a keyring may hold as many keys as its certificates
+/// do.
+struct Issuers {
+    fingerprints: Vec<Fingerprint>,
+    key_ids: Vec<KeyId>,
 }
 
-/// Whether one of the issuers `signature` names is `key`.
-fn names(signature: &Signature, key: &PublicKey) -> bool {
-    issued_by(signature, key) == Some(true)
-}
+impl Issuers {
+    fn of(signature: &Signature) -> Issuers {
+        let mut fingerprints: Vec<Fingerprint> = signature.issuer_fingerprints().collect();
+        let mut key_ids: Vec<KeyId> = signature.issuer_key_ids().collect();
+        fingerprints.sort_unstable();
+        fingerprints.dedup();
+        key_ids.sort_unstable();
+        key_ids.dedup();
+        Issuers {
+            fingerprints,
+            key_ids,
+        }
+    }
 
-/// Whether the issuers `signature` names include `key`, or `None` if it
-/// names none.
-fn issued_by(signature: &Signature, key: &PublicKey) -> Option<bool> {
-    let fingerprint = key.fingerprint();
-    let key_id = key.key_id();
-    let mut named = None;
-    for issuer in signature.issuer_fingerprints() {
-        if issuer == fingerprint {
-            return Some(true);
-        }
-        named = Some(false);
+    /// Whether the signature may have been made by `key`, as its issuers
+    /// say: if it names `key`, or names no issuer at all.
+    ///
+    /// An issuer is a hint, and an unhashed one can be changed by anyone, so
+    /// this only decides which keys a signature over a document is tried
+    /// with. Trying one that is named wrongly costs a failed verification,
+    /// and passing over one that is named wrongly loses nothing that removing
+    /// the signature would not, since a document's signature can only be
+    /// accepted. A certificate's own signatures, which can restrict what it
+    /// grants, are each verified with the key that would have made them
+    /// whatever issuer they name (see the [`policy`] module).
+    fn may_be_by(&self, key: &PublicKey) -> bool {
+        (self.fingerprints.is_empty() && self.key_ids.is_empty()) || self.name(key)
     }
-    for issuer in signature.issuer_key_ids() {
-        if issuer == key_id {
-            return Some(true);
-        }
-        named = Some(false);
+
+    /// Whether one of the issuers is `key`.
+    fn name(&self, key: &PublicKey) -> bool {
+        self.fingerprints.binary_search(&key.fingerprint()).is_ok()
+            || self.key_ids.binary_search(&key.key_id()).is_ok()
     }
-    named
 }
 
 /// A signature a key in the keyring made over a document, and the policy

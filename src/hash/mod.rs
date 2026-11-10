@@ -201,6 +201,8 @@ impl Context {
 
     /// Appends `data` to the input.
     pub(crate) fn update(&mut self, data: &[u8]) {
+        #[cfg(test)]
+        crate::test_support::work::hashed(data.len());
         match self {
             Context::Sha1(hash) => hash.update(data),
             Context::Sha224(hash) => hash.update(data),

@@ -2,6 +2,7 @@
 //! with, which refusal is reported, a document hashed in pieces, and the
 //! documents and certificates GnuPG made, judged under the default policy.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use super::{Keyring, Refusal};
@@ -12,6 +13,7 @@ use crate::packet::Version;
 use crate::policy::{Authority, Policy, Reason};
 use crate::signature::{Signature, SignatureType, SubpacketType};
 use crate::test_support::forge::{self, Key};
+use crate::test_support::work::{self, Work};
 use crate::test_support::{vector, vector_bytes};
 
 const CREATED: u32 = 1_544_987_117;
@@ -347,6 +349,105 @@ fn a_document_hashed_in_pieces() {
             .unwrap_err()
             .reason(),
         Reason::TooManySignatures
+    );
+}
+
+/// Trying a signature with many keys costs its hash once: a version 6
+/// signature's hashed area may be as long as its packet, and a keyring may
+/// hold any number of keys of its algorithm, such as subkeys appended to a
+/// certificate without a binding, so finishing the hash for each key would
+/// cost the two multiplied. The work grows with neither multiplied by the
+/// other, whichever key verifies, and a signature that names only keys the
+/// keyring does not hold is never finished at all.
+#[test]
+fn the_work_of_trying_a_signature_does_not_multiply() {
+    let primary = Key::ed25519(1, Version::V6, CREATED);
+    let direct = primary
+        .sign(SignatureType::DIRECT_KEY, CREATED)
+        .key_flags(0x03)
+        .over_key(&primary);
+    let keyring = |subkeys: u32| {
+        let mut packets = vec![primary.primary(), direct.clone()];
+        for at in 0..subkeys {
+            packets.push(Key::ed25519(2, Version::V6, CREATED + at).subkey());
+        }
+        let parts: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
+        Keyring::new([forge::certificate(&parts)])
+    };
+    let padding = vec![0x5A; 64 * 1024];
+    let creation = SIGNED.to_be_bytes();
+    let signature = |over: &[u8]| {
+        forge::read(
+            &primary
+                .sign(SignatureType::BINARY, SIGNED)
+                .bare()
+                .hashed(SubpacketType::SIGNATURE_CREATION_TIME, &creation)
+                .hashed(SubpacketType(101), &padding)
+                .over_document(over),
+        )
+    };
+    let good = signature(DOCUMENT);
+    let other = signature(b"another document");
+    let hashed_fields = u64::try_from(good.hashed_fields().len()).unwrap();
+    let mut each = Vec::new();
+    for subkeys in [1, 64] {
+        let keyring = keyring(subkeys);
+        assert_eq!(keyring.certificates()[0].subkeys().len(), subkeys as usize);
+        let (verdict, unverified) = work::of(|| verify(&keyring, core::slice::from_ref(&other)));
+        assert_eq!(verdict.unwrap_err().reason(), Reason::Unverified);
+        assert_eq!(unverified.operations, 0);
+        // The salt, the document, and the hashed fields and trailer once.
+        assert!(unverified.hashed < hashed_fields + 64, "{unverified:?}");
+        let (verdict, verified) = work::of(|| verify(&keyring, core::slice::from_ref(&good)));
+        assert_eq!(verdict, Ok(primary.public().fingerprint()));
+        each.push((unverified.hashed, verified.operations));
+    }
+    // Nothing the subkeys add is hashed. Two equations are checked: the
+    // document's signature with the primary key, tried first, and the
+    // direct-key signature that grants it the right to sign.
+    assert_eq!(each[0], each[1]);
+    assert_eq!(each[0].1, 2);
+
+    // Among many issuers, the one that names a key in the keyring is found,
+    // and a signature that names none of its keys is passed over unhashed.
+    let named = |names: &[Fingerprint]| {
+        let mut signing = primary
+            .sign(SignatureType::BINARY, SIGNED)
+            .bare()
+            .hashed(SubpacketType::SIGNATURE_CREATION_TIME, &creation);
+        for name in names {
+            signing = signing.unhashed(
+                SubpacketType::ISSUER_FINGERPRINT,
+                &[&[6][..], name.as_bytes()].concat(),
+            );
+        }
+        forge::read(&signing.over_document(DOCUMENT))
+    };
+    let strangers: Vec<Fingerprint> = (0..200)
+        .map(|seed| {
+            Key::ed25519(seed, Version::V6, SIGNED)
+                .public()
+                .fingerprint()
+        })
+        .filter(|fingerprint| *fingerprint != primary.public().fingerprint())
+        .collect();
+    let keyring = keyring(64);
+    let mut names = strangers.clone();
+    names.insert(100, primary.public().fingerprint());
+    assert_eq!(
+        verify(&keyring, &[named(&names)]),
+        Ok(primary.public().fingerprint())
+    );
+    let unnamed = named(&strangers);
+    let (verdict, work) = work::of(|| verify(&keyring, core::slice::from_ref(&unnamed)));
+    assert_eq!(verdict.unwrap_err().reason(), Reason::Unverified);
+    // The salt and the document, which hashing begins with, and no more.
+    assert_eq!(
+        work,
+        Work {
+            hashed: (unnamed.salt().len() + DOCUMENT.len()) as u64,
+            operations: 0
+        }
     );
 }
 

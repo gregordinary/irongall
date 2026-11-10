@@ -342,6 +342,8 @@ impl Signature {
         if digest.as_bytes().get(..2) != Some(&self.hash_prefix[..]) {
             return Err(VerifyError::HashPrefixMismatch);
         }
+        #[cfg(test)]
+        crate::test_support::work::operation();
         match check {
             Check::Rsa {
                 modulus,
@@ -651,23 +653,52 @@ impl<'a> DocumentHash<'a> {
     pub fn verify(&self, key: &PublicKey) -> Result<(), VerifyError> {
         let check = self.signature.check_key(key)?;
         self.signature.check_hash_length()?;
-        self.check_digests(check)
+        self.signature.check_digests(check, &self.digests())
     }
 
-    /// Checks that `key` made the signature over the document passed so
-    /// far, as [`Signature::made_by`] does over [`Subject::Document`]:
-    /// without the floor on the length of an Ed25519 signature's hash.
-    pub(crate) fn made_by(&self, key: &PublicKey) -> Result<(), VerifyError> {
-        let check = self.signature.check_key(key)?;
-        self.check_digests(check)
+    /// The document passed so far, ready to be checked against one key
+    /// after another without finishing its hashes for each.
+    pub(crate) fn checks<'h>(&'h self) -> DocumentChecks<'h, 'a> {
+        DocumentChecks {
+            hash: self,
+            digests: None,
+        }
     }
 
-    /// Checks the hashes of the document passed so far against `check`.
-    fn check_digests(&self, check: Check<'_>) -> Result<(), VerifyError> {
-        let digests = self
-            .signature
-            .finish(&self.context, self.line_endings.as_ref());
-        self.signature.check_digests(check, &digests)
+    /// The hashes of the document passed so far, finished: the signature's
+    /// hashed fields and trailer hashed after it, in each reading of the
+    /// document.
+    fn digests(&self) -> Digests {
+        self.signature
+            .finish(&self.context, self.line_endings.as_ref())
+    }
+}
+
+/// A document hashed for a signature, checked against one key after
+/// another: what [`DocumentHash::checks`] begins.
+///
+/// Finishing a hash hashes the signature's own hashed fields, which a
+/// version 6 signature may make as long as its packet, so they are finished
+/// once, when the first key that may have made the signature is checked,
+/// rather than once for each key. The [`DocumentHash`] itself is left as it
+/// was, and may be hashed further.
+#[derive(Debug)]
+pub(crate) struct DocumentChecks<'h, 'a> {
+    hash: &'h DocumentHash<'a>,
+    digests: Option<Digests>,
+}
+
+impl DocumentChecks<'_, '_> {
+    /// Checks that `key` made the signature over the document, as
+    /// [`DocumentHash::verify`] does, but without the floor on the length of
+    /// an Ed25519 signature's hash: which key made it is the equation's to
+    /// say, and whether its hash is long enough the policy's (see
+    /// [`Signature::made_by`]).
+    pub(crate) fn made_by(&mut self, key: &PublicKey) -> Result<(), VerifyError> {
+        let hash = self.hash;
+        let check = hash.signature.check_key(key)?;
+        let digests = self.digests.get_or_insert_with(|| hash.digests());
+        hash.signature.check_digests(check, digests)
     }
 }
 

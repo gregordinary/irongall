@@ -855,9 +855,9 @@ fn a_hash_too_short_for_ed25519_is_attributed_but_does_not_verify() {
         let mut hash = signature.document_hash().unwrap();
         hash.update(&document);
         assert_eq!(hash.verify(key), expected, "{algorithm}");
-        assert_eq!(hash.made_by(key), Ok(()), "{algorithm}");
+        assert_eq!(hash.checks().made_by(key), Ok(()), "{algorithm}");
         assert_eq!(
-            hash.made_by(other),
+            hash.checks().made_by(other),
             Err(VerifyError::BadSignature),
             "{algorithm}"
         );

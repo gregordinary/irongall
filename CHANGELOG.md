@@ -11,6 +11,13 @@ public API changes, since a verifier's verdicts are part of its contract.
 
 ## [Unreleased]
 
+### Security
+
+- Verifying a document against a keyring finishes each signature's hash
+  once, however many keys it is tried with, and looks up the keys its
+  issuers name. Earlier releases could do work in proportion to a
+  signature's size times the number of keys in the keyring.
+
 ### Changed
 
 - SECURITY.md states which releases receive security fixes.

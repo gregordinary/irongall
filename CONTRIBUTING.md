@@ -140,6 +140,9 @@ and a case in `divergences.rs` that produces it.
   input and never recurses on its structure. Judging is linear too: a
   subject hashed once for each signature over it, such as a user ID or a
   subkey, is bounded in size before any of those signatures is verified.
+  The unit tests count the octets hashed and the public-key operations
+  performed (`test_support::work`), so a bound is held by a test rather
+  than a timing.
 - **No constant-time code, and no claim of it.** Everything a verification
   computes over is public: the key, the signature, and the signed data. That
   is what makes hand-written cryptography reasonable here, and it leaves

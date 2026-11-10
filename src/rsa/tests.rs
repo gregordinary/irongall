@@ -340,6 +340,14 @@ fn encodings_follow_table_24() {
             Digest::Sha512([0; 64]),
             "3051300d060960864801650304020305000440",
         ),
+        (
+            Digest::Sha3_256([0; 32]),
+            "3031300d060960864801650304020805000420",
+        ),
+        (
+            Digest::Sha3_512([0; 64]),
+            "3051300d060960864801650304020a05000440",
+        ),
     ] {
         let prefix = hex(prefix);
         let encoding = super::encoding(&digest, 256);

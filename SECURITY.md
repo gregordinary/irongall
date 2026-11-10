@@ -70,5 +70,6 @@ privately and we will work it out.
 Security fixes are made to the newest release, and published as a release
 of their own; earlier releases are not patched, so receiving a fix means
 upgrading to the newest release. While the major version is 0, a fix that
-changes the public API is published as a new minor version, such as 0.2.0
-after 0.1.x, and any other as a new patch version.
+breaks compatibility with the public API is published as a new minor
+version, such as 0.2.0 after 0.1.x, and any other, including one that only
+adds to the API, as a new patch version.

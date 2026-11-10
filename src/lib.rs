@@ -114,6 +114,13 @@
 //!   a signature over the certificate's other parts, as Sequoia does, within
 //!   a bound the certificate's size sets, and a certificate that needs more
 //!   grants nothing.
+//! - **A back-signature's expiration** holds only where the binding that
+//!   embeds the back-signature covers it, in its hashed area, as Sequoia and
+//!   OpenPGP.js place it; a binding whose back-signature in the unhashed
+//!   area states an expiration refuses its subkey. §5.2.3.34 does not say
+//!   which area holds an embedded signature. GnuPG and RNP place a
+//!   back-signature in the unhashed area and give it no expiration of its
+//!   own.
 //! - **Old SHA-1 self-signatures**, made over a primary key before
 //!   1 February 2023, grant what they state, though a policy refuses SHA-1
 //!   elsewhere. RFC 9580 §9.5 forbids validating a recent signature that

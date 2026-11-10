@@ -32,6 +32,11 @@ public API changes, since a verifier's verdicts are part of its contract.
   once, however many keys it is tried with, and looks up the keys its
   issuers name. Earlier releases could do work in proportion to a
   signature's size times the number of keys in the keyring.
+- A subkey binding whose back-signature, in the binding's unhashed area,
+  states an expiration refuses the subkey, as `Reason::UnhonoredBinding`,
+  since the binding does not cover that expiration. Earlier releases
+  applied it. Back-signatures in the hashed area, and those GnuPG and RNP
+  make, which state no expiration, are judged as before.
 
 ### Changed
 

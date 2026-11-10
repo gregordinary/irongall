@@ -167,6 +167,8 @@ pub struct Signature {
     creation_time: u32,
     /// The signatures embedded in either area, hashed area first.
     embedded: Vec<Signature>,
+    /// How many of `embedded`, from the first, are in the hashed area.
+    embedded_hashed: usize,
     /// The body from the version through the hashed subpackets: the part of
     /// the signature its own hash covers (RFC 9580 §5.2.4).
     hashed_fields: Vec<u8>,
@@ -296,6 +298,7 @@ impl Signature {
             material,
             creation_time,
             embedded: embedded_signatures,
+            embedded_hashed,
             hashed_fields,
             length,
         })
@@ -419,10 +422,21 @@ impl Signature {
     /// the unhashed one: in practice, a signing subkey's back-signature in its
     /// binding (RFC 9580 §5.2.3.34).
     ///
-    /// An embedded signature is verified on its own, so the area it was found
-    /// in does not matter. Its own embedded signatures are not read.
+    /// An embedded signature is verified on its own. The area it was found in
+    /// says only whether this signature covers it, which decides whether a
+    /// back-signature's expiration can hold (see the [`policy`](crate::policy)
+    /// module). Its own embedded signatures are not read.
     pub fn embedded_signatures(&self) -> &[Signature] {
         &self.embedded
+    }
+
+    /// The [embedded signatures](Self::embedded_signatures) in the hashed
+    /// area, which this signature covers, and those in the unhashed area,
+    /// which nothing covers.
+    pub(crate) fn embedded_by_area(&self) -> (&[Signature], &[Signature]) {
+        self.embedded
+            .split_at_checked(self.embedded_hashed)
+            .unwrap_or((&self.embedded, &[]))
     }
 
     /// The part of the body the signature's own hash covers: from the version

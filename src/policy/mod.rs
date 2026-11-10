@@ -86,7 +86,9 @@
 //!   signatures are accepted from the creation of the later of the two keys
 //!   until the earliest of the primary key's lapse, the bindings' key
 //!   expirations, and the bindings' and the back-signatures' own
-//!   expirations.
+//!   expirations. A back-signature that states an expiration must be in the
+//!   binding's hashed area, which the binding covers; see [the
+//!   back-signature's expiration](#a-back-signatures-expiration).
 //!
 //! A signature counts as made by the given time if it is dated no later
 //! than the policy's [clock skew](Policy::clock_skew) after it.
@@ -141,6 +143,18 @@
 //! primary user ID to any user ID marked primary or certified over a hash
 //! the policy accepts. A certificate stripped of its other user IDs is,
 //! however, bound by it alone, with no expiration.
+//!
+//! # A back-signature's expiration
+//!
+//! A binding covers the back-signature it embeds only if the back-signature
+//! is in its hashed area, as Sequoia and OpenPGP.js place it. GnuPG and RNP
+//! place it in the unhashed area, which no signature covers. A
+//! back-signature's expiration therefore holds only in the hashed area: one
+//! in the unhashed area that states an expiration refuses the subkey
+//! ([`Reason::UnhonoredBinding`]) rather than bound it. GnuPG and RNP give a
+//! back-signature no expiration of its own, and one in the unhashed area
+//! that states none gives its consent as one the binding covers does. Every
+//! bound on a subkey irongall accepts rests on a signature that covers it.
 //!
 //! # A document's signature
 //!
@@ -507,7 +521,10 @@ pub enum Reason {
     UnboundSubkey,
     /// The subkey's governing binding is one irongall does not honor: it
     /// carries a critical subpacket whose meaning irongall does not
-    /// implement, or is malformed where verifying it does not look.
+    /// implement, is malformed where verifying it does not look, or embeds
+    /// in its unhashed area a back-signature that states an expiration,
+    /// which the binding does not cover (see the [module
+    /// documentation](self)).
     UnhonoredBinding,
     /// The subkey's governing binding rests on a hash the policy does not
     /// accept, or on one shorter than its public-key algorithm allows.
@@ -1155,8 +1172,9 @@ fn subkey_standing(
 }
 
 /// When the consent a binding's back-signatures give lapses, or `None` if it
-/// does not; or [`Reason::MissingBackSignature`] if the binding embeds none
-/// that counts.
+/// does not; [`Reason::UnhonoredBinding`] if one that counts states an
+/// expiration the binding does not cover; or
+/// [`Reason::MissingBackSignature`] if the binding embeds none that counts.
 ///
 /// A back-signature counts if it is a primary key binding (0x19) that
 /// verifies as `subkey`'s over the two keys, rests on a hash the policy
@@ -1168,8 +1186,11 @@ fn subkey_standing(
 /// without which any certificate could adopt a signing key it does not hold
 /// and present that key's signatures as its own (RFC 9580 §5.2.1.8). Its
 /// expiration bounds the consent, and where several count, the earliest
-/// expiration governs: one copied from an older binding cannot extend a
-/// consent the newer one limits.
+/// expiration governs, so one added beside another extends nothing. An
+/// expiration holds only where the binding covers the back-signature, in
+/// its hashed area, so a binding whose back-signature in the unhashed area
+/// states one is refused rather than bounded by it (see [the
+/// back-signature's expiration](self#a-back-signatures-expiration)).
 fn back_signature_lapse(
     binding: &Signature,
     primary: &PublicKey,
@@ -1180,18 +1201,26 @@ fn back_signature_lapse(
     let subject = Subject::Subkey { primary, subkey };
     // A back-signature only grants, so unlike a certificate's other
     // statements, it counts only if it verifies outright.
-    let mut lapses = binding
-        .embedded_signatures()
+    let counts = |back: &&Signature| {
+        back.signature_type() == SignatureType::PRIMARY_KEY_BINDING
+            && made.contains(&u64::from(back.creation_time()))
+            && policy.accepts_hash_of(back)
+            && back.verify(subkey, subject).is_ok()
+    };
+    let (covered, uncovered) = binding.embedded_by_area();
+    let mut counted = false;
+    for back in uncovered.iter().filter(counts) {
+        if signature_expires(back).is_some() {
+            return Err(Reason::UnhonoredBinding);
+        }
+        counted = true;
+    }
+    let mut lapses = covered
         .iter()
-        .filter(|back| {
-            back.signature_type() == SignatureType::PRIMARY_KEY_BINDING
-                && made.contains(&u64::from(back.creation_time()))
-                && policy.accepts_hash_of(back)
-                && back.verify(subkey, subject).is_ok()
-        })
+        .filter(counts)
         .map(signature_expires)
         .peekable();
-    if lapses.peek().is_none() {
+    if !counted && lapses.peek().is_none() {
         return Err(Reason::MissingBackSignature);
     }
     Ok(earliest(lapses))

@@ -452,7 +452,7 @@ fn an_expired_key_verifies_nothing_however_its_expiration_is_stated() {
                 &certifying,
                 &subkey.subkey(),
                 &binding()
-                    .embed(
+                    .embed_hashed(
                         &subkey
                             .sign(SignatureType::PRIMARY_KEY_BINDING, CREATED)
                             .expiration(10 * DAY)
@@ -715,7 +715,7 @@ fn an_issuer_hides_no_restriction() {
                     .sign(SignatureType::SUBKEY_BINDING, CREATED)
                     .key_flags(SIGN);
                 for back in embedded {
-                    signing = signing.embed(back);
+                    signing = signing.embed_hashed(back);
                 }
                 let certificate = forge::certificate(&[
                     &primary.primary(),
@@ -1007,8 +1007,8 @@ fn a_signing_subkey_without_a_back_signature_is_refused() {
 }
 
 /// A back-signature's expiration bounds the consent it gives, and with it
-/// the subkey's authority. Where a binding carries several, the earliest
-/// expiration governs.
+/// the subkey's authority, where the binding covers it. Where a binding
+/// carries several, the earliest expiration governs.
 #[test]
 fn an_expiring_back_signature_bounds_the_subkeys_authority() {
     let (primary, subkey) = (ed25519(1), ed25519(2));
@@ -1026,7 +1026,7 @@ fn an_expiring_back_signature_bounds_the_subkeys_authority() {
             .sign(SignatureType::SUBKEY_BINDING, CREATED)
             .key_flags(SIGN);
         for back in backs {
-            signing = signing.embed(back);
+            signing = signing.embed_hashed(back);
         }
         let certificate = forge::certificate(&[
             &primary.primary(),
@@ -1043,6 +1043,111 @@ fn an_expiring_back_signature_bounds_the_subkeys_authority() {
         assert_eq!(
             verdict(&certificate, &[&signed(&subkey, SIGNED)]),
             Err(Reason::AfterKeyExpiration)
+        );
+    }
+}
+
+/// A back-signature's expiration holds only where the binding covers it. In
+/// the hashed area, no change to the unhashed area lifts it. In the unhashed
+/// area, it refuses the subkey: replacing it with an older back-signature
+/// the subkey made over the same keys makes, octet for octet, the binding
+/// GnuPG itself makes when it re-makes one, carrying the first
+/// back-signature forward, and that binding is accepted as GnuPG's is. A
+/// back-signature in the unhashed area that states no expiration gives its
+/// consent, and an embedded signature that is not the subkey's consent
+/// refuses nothing, wherever it is.
+#[test]
+fn a_back_signatures_expiration_holds_only_where_the_binding_covers_it() {
+    for version in [Version::V4, Version::V6] {
+        let primary = Key::ed25519(1, version, CREATED);
+        let subkey = Key::ed25519(2, version, CREATED);
+        let other = Key::ed25519(3, version, CREATED);
+        let document = signed(&subkey, SIGNED);
+        let later = CREATED + DAY;
+        let direct = primary
+            .sign(SignatureType::DIRECT_KEY, CREATED)
+            .key_flags(CERTIFY | SIGN)
+            .over_key(&primary);
+        let older = binding(&primary, &subkey, CREATED, SIGN);
+        let lasting = back_signature(&primary, &subkey, CREATED);
+        let expiring_by = |key: &Key| {
+            key.sign(SignatureType::PRIMARY_KEY_BINDING, later)
+                .expiration(TWO_YEARS)
+                .over_subkey(&primary, &subkey)
+        };
+        let expiring = expiring_by(&subkey);
+        let newer = |hashed: &[&[u8]], unhashed: &[&[u8]]| {
+            let mut signing = primary
+                .sign(SignatureType::SUBKEY_BINDING, later)
+                .key_flags(SIGN);
+            for back in hashed {
+                signing = signing.embed_hashed(back);
+            }
+            for back in unhashed {
+                signing = signing.embed(back);
+            }
+            signing.over_subkey(&primary, &subkey)
+        };
+        let with = |newer: &[u8]| {
+            forge::certificate(&[&primary.primary(), &direct, &subkey.subkey(), &older, newer])
+        };
+        let standing = |newer: &[u8]| standings(&with(newer), NOW)[1];
+        let mut carried = Vec::new();
+        forge::with_unhashed(&older, |area| {
+            carried = area.to_vec();
+            area.to_vec()
+        });
+        let bounded = Ok(window(
+            CREATED,
+            Some(u64::from(later) + u64::from(TWO_YEARS)),
+        ));
+        let unbounded = Ok(window(CREATED, None));
+
+        let covered = newer(&[&expiring], &[]);
+        assert_eq!(standing(&covered), bounded, "{version:?}");
+        assert_eq!(
+            verdict(&with(&covered), &[&document]),
+            Err(Reason::AfterKeyExpiration)
+        );
+        for changed in [
+            forge::with_unhashed(&covered, |_| carried.clone()),
+            forge::with_unhashed(&covered, |area| [area, &carried].concat()),
+            forge::with_unhashed(&covered, |_| Vec::new()),
+        ] {
+            assert_eq!(standing(&changed), bounded, "{version:?}");
+        }
+
+        let uncovered = newer(&[], &[&expiring]);
+        assert_eq!(
+            standing(&uncovered),
+            Err(Reason::UnhonoredBinding),
+            "{version:?}"
+        );
+        let added = forge::with_unhashed(&uncovered, |area| [area, &carried].concat());
+        assert_eq!(standing(&added), Err(Reason::UnhonoredBinding));
+        let emptied = forge::with_unhashed(&uncovered, |_| Vec::new());
+        assert_eq!(standing(&emptied), Err(Reason::MissingBackSignature));
+        let replaced = forge::with_unhashed(&uncovered, |_| carried.clone());
+        assert_eq!(replaced, newer(&[], &[&lasting]), "{version:?}");
+        assert_eq!(standing(&replaced), unbounded, "{version:?}");
+
+        // Beside a covered back-signature, an uncovered one that states an
+        // expiration still refuses; one that is not the subkey's does not.
+        assert_eq!(
+            standing(&newer(&[&lasting], &[&expiring])),
+            Err(Reason::UnhonoredBinding),
+            "{version:?}"
+        );
+        let foreign = expiring_by(&other);
+        assert_eq!(
+            standing(&newer(&[], &[&lasting, &foreign])),
+            unbounded,
+            "{version:?}"
+        );
+        assert_eq!(
+            standing(&newer(&[], &[&foreign])),
+            Err(Reason::MissingBackSignature),
+            "{version:?}"
         );
     }
 }

@@ -104,7 +104,7 @@
 //!   return and the signature still hold.
 //! - **Cleartext signed messages** are read as GnuPG reads them: each line
 //!   loses its trailing carriage returns with the trailing spaces and tabs
-//!   §7.2 names. A line beginning with a dash must be dash-escaped, and
+//!   §7.1 names. A line beginning with a dash must be dash-escaped, and
 //!   only blank lines may come before or after the message, where GnuPG
 //!   keeps such a line as it is and skips text around the message.
 //! - **Armor** must be laid out as §6.2 gives it, with only blank lines

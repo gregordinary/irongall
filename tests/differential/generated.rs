@@ -203,7 +203,7 @@ fn detached_signatures() {
 }
 
 /// Whether rPGP's cleartext signer hashes `text` with what the cleartext
-/// form cannot carry: a line ending in a space or a tab, which RFC 9580 §7.2
+/// form cannot carry: a line ending in a space or a tab, which RFC 9580 §7.1
 /// removes before hashing, or a final CR, which joins the line ending before
 /// the signature. rPGP's own reader then refuses what its signer made, as
 /// irongall does.

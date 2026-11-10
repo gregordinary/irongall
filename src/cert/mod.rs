@@ -188,7 +188,8 @@ impl Certificate {
 
     /// The parts of the certificate that were passed over, each with the
     /// reason: signatures and subkeys that do not read, signatures that do
-    /// not belong where they are, and subkeys of the wrong version.
+    /// not belong where they are, subkeys of the wrong version, and user IDs
+    /// longer than 2048 octets.
     pub fn skipped(&self) -> &[PacketError] {
         &self.skipped
     }

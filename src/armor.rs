@@ -29,8 +29,8 @@
 //!   checksum is present, missing, malformed, or wrong: integrity is the job of
 //!   the signatures the data carries, not of the armor.
 //! - Each armor header must be a `Key: Value` pair whose value is UTF-8. No
-//!   signature covers the headers, and they are returned as they appear,
-//!   uninterpreted.
+//!   signature covers the headers, and they are returned uninterpreted, as
+//!   they appear but for the whitespace that ends their line.
 //! - A block without armor headers may lack the blank line before its data,
 //!   as GnuPG, Sequoia, and RNP read it, and as RFC 9580 §6.2.2 asks of a
 //!   reader faced with malformed headers. A first line that is not a header
@@ -50,7 +50,10 @@
 //!
 //! The cleartext signed messages of RFC 9580 §7, which carry their text
 //! unencoded ahead of an armored signature block, are read by
-//! [`document::cleartext`](crate::document::cleartext) with the same rules.
+//! [`document::cleartext`](crate::document::cleartext) with the same rules,
+//! but for the text itself. A line of the text loses only the spaces, tabs,
+//! and carriage returns it ends with, as GnuPG reads it, so other whitespace
+//! at its end, such as a form feed, is part of what is signed.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;

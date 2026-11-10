@@ -648,6 +648,7 @@ pub irongall::policy::Reason::SubkeyMayNotSign
 pub irongall::policy::Reason::SubkeyRevoked
 pub irongall::policy::Reason::TextSignature
 pub irongall::policy::Reason::TooManySignatures
+pub irongall::policy::Reason::UnattributedSignatures
 pub irongall::policy::Reason::UnboundSubkey
 pub irongall::policy::Reason::UnhonoredBinding
 pub irongall::policy::Reason::UnhonoredSelfSignature

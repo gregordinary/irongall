@@ -26,6 +26,25 @@
 //! can be changed by anyone who handles the certificate, and one naming
 //! another key would hide a revocation the primary key made.
 //!
+//! What a statement is over, the primary key alone, a user ID, or a subkey,
+//! is established the same way, by verifying it over that part, never by
+//! where it is placed, since the order of a certificate's packets is
+//! covered by no signature either. A statement that does not verify over
+//! the part it is placed with is tried over every other part it may be
+//! over, and counts over the one it verifies over.
+//!
+//! That search is bounded by the certificate's size. A certificate as its
+//! maker wrote it places each of its own statements where it verifies, so
+//! what is searched are the certifications other keys made over its user
+//! IDs, each tried over every user ID, and whatever has been inserted or
+//! moved. Judging a certificate hashes at most 128 octets in the search for
+//! each octet of the certificate's signatures, and checks by its equation
+//! no more signatures there than the certificate holds. A certificate that
+//! needs more grants nothing ([`Reason::UnattributedSignatures`]), since a
+//! statement the search did not reach might restrict it. Certifications by
+//! other keys stay within the bound unless the certificate has scores of
+//! user IDs and almost nothing but such certifications.
+//!
 //! - A certificate grants nothing if its primary key has revoked itself, for
 //!   whatever reason and from whatever time, or if the policy does not accept
 //!   its primary key.
@@ -135,6 +154,7 @@
 //! new signature within its life. A document pinned in the past is judged
 //! as of the time it was published.
 
+mod statements;
 #[cfg(test)]
 mod tests;
 
@@ -149,6 +169,7 @@ use crate::hash::HashAlgorithm;
 use crate::key::{KeyMaterial, PublicKey};
 use crate::packet::Version;
 use crate::signature::{self, Signature, SignatureType, Subject};
+use statements::{Statement, Statements};
 
 /// The rules a signature is judged by.
 ///
@@ -499,6 +520,12 @@ pub enum Reason {
     MissingBackSignature,
     /// The policy does not accept the subkey.
     WeakSubkey,
+    /// The certificate holds more signatures that are not over the part they
+    /// are placed with than judging it tries over its other parts: finding
+    /// what each is over would take more work than the size of the
+    /// certificate's signatures allows, so a restriction its primary key
+    /// made might be missed (see the [module documentation](self)).
+    UnattributedSignatures,
 }
 
 impl fmt::Display for Reason {
@@ -565,6 +592,10 @@ impl fmt::Display for Reason {
                 "the subkey that made the signature has not counter-signed its binding"
             }
             Reason::WeakSubkey => "the policy does not accept the subkey that made the signature",
+            Reason::UnattributedSignatures => {
+                "the signing key's certificate holds more signatures out of place than irongall \
+                 tries to place"
+            }
         })
     }
 }
@@ -590,22 +621,27 @@ impl<'a> Authority<'a> {
     ///
     /// This verifies the certificate's signatures, each with the key that
     /// would have made it whatever issuer it names: at most one public-key
-    /// operation for each signature the certificate holds, two for a
-    /// certification revocation that follows a user ID, which may be over
-    /// the user ID or over the primary key alone, and one for each
-    /// back-signature in a governing subkey binding.
+    /// operation for each signature the certificate holds, over the part it
+    /// is placed with, two for a certification revocation that follows a
+    /// user ID, which may be over the user ID or over the primary key alone,
+    /// and one for each back-signature in a governing subkey binding. The
+    /// search for what the signatures that are not over the part they are
+    /// placed with are over adds at most one more for each signature, and
+    /// hashes at most 128 octets for each octet of them (see the [module
+    /// documentation](self)).
     ///
     /// Everything a signature is hashed over is public, so anyone can give a
     /// signature the two-octet hash prefix that lets it reach its public-key
     /// operation. A certificate of uncertain origin, such as a copy from a
     /// keyserver, can therefore make judging it cost time in proportion to
-    /// its size: on the order of a second for each megabyte of such
+    /// its size: on the order of a second or two for each megabyte of such
     /// signatures, under an RSA-2048 or Ed25519 primary key, and more under
     /// a wider RSA key. [`Keyring::verify`](crate::keyring::Keyring::verify)
     /// judges a certificate only once one of its keys has made a signature
     /// on the document.
     pub fn new(certificate: &'a Certificate, policy: &Policy, now: u64) -> Authority<'a> {
-        let governing = Governing::of(certificate, policy, now);
+        let statements = Statements::of(certificate, policy);
+        let governing = Governing::of(certificate, &statements, policy, now);
         let anchor = anchor(certificate, &governing, policy);
         let primary = anchor.and_then(|lapse| {
             primary_may_sign(&governing)?;
@@ -616,9 +652,20 @@ impl<'a> Authority<'a> {
         });
         let mut standings = Vec::with_capacity(certificate.subkeys().len().saturating_add(1));
         standings.push(primary);
-        standings.extend(certificate.subkeys().iter().map(|subkey| {
-            anchor.and_then(|lapse| subkey_standing(certificate, subkey, policy, now, lapse))
-        }));
+        standings.extend(certificate.subkeys().iter().zip(&statements.subkeys).map(
+            |(subkey, statements)| {
+                anchor.and_then(|lapse| {
+                    subkey_standing(
+                        certificate,
+                        subkey,
+                        statements.as_deref(),
+                        policy,
+                        now,
+                        lapse,
+                    )
+                })
+            },
+        ));
         Authority {
             certificate,
             lapse: anchor,
@@ -733,24 +780,22 @@ fn earliest(times: impl IntoIterator<Item = Option<u64>>) -> Option<u64> {
     times.into_iter().flatten().min()
 }
 
-/// The signatures that govern among `candidates`, each a signature and
-/// whether irongall honors it: of those dated within `made` that
-/// `attributed` attributes to the key that would have made them, the
-/// newest, with every other made in the same second. Empty if none
+/// The signatures that govern among `candidates`, statements the primary
+/// key made over one part of its certificate: of those dated within `made`,
+/// the newest, with every other made in the same second. Empty if none
 /// qualifies.
 ///
 /// Packet order is covered by no signature, so it decides nothing: every
 /// signature tied as the newest governs, and the caller combines what they
 /// state restrictively.
 fn govern<'s>(
-    candidates: impl Iterator<Item = (&'s Signature, bool)>,
+    candidates: impl Iterator<Item = Statement<'s>>,
     made: &RangeInclusive<u64>,
-    attributed: impl Fn(&Signature) -> bool,
-) -> Vec<(&'s Signature, bool)> {
-    let mut newest: Vec<(&'s Signature, bool)> = Vec::new();
+) -> Vec<Statement<'s>> {
+    let mut newest: Vec<Statement<'s>> = Vec::new();
     for (signature, honored) in candidates {
         let created = signature.creation_time();
-        if !made.contains(&u64::from(created)) || !attributed(signature) {
+        if !made.contains(&u64::from(created)) {
             continue;
         }
         let held = newest.first().map(|(held, _)| held.creation_time());
@@ -764,17 +809,14 @@ fn govern<'s>(
     newest
 }
 
-/// Pairs each honored signature with `true` and each unhonored one with
-/// `false`, those of `signature_type` only.
+/// The statements among `statements` whose type `signature_type` accepts.
 fn of_type<'s>(
-    honored: &'s [Signature],
-    unhonored: &'s [Signature],
-    signature_type: impl Fn(SignatureType) -> bool + Copy,
-) -> impl Iterator<Item = (&'s Signature, bool)> {
-    let honored = honored.iter().map(|signature| (signature, true));
-    let unhonored = unhonored.iter().map(|signature| (signature, false));
-    honored
-        .chain(unhonored)
+    statements: &[Statement<'s>],
+    signature_type: impl Fn(SignatureType) -> bool,
+) -> impl Iterator<Item = Statement<'s>> {
+    statements
+        .iter()
+        .copied()
         .filter(move |(signature, _)| signature_type(signature.signature_type()))
 }
 
@@ -790,13 +832,11 @@ fn is_certification(signature_type: SignatureType) -> bool {
     )
 }
 
-/// The certification revocations among `honored` and `unhonored`, each with
-/// whether irongall honors it.
+/// The certification revocations among `statements`.
 fn certification_revocations<'s>(
-    honored: &'s [Signature],
-    unhonored: &'s [Signature],
-) -> impl Iterator<Item = (&'s Signature, bool)> {
-    of_type(honored, unhonored, |signature_type| {
+    statements: &[Statement<'s>],
+) -> impl Iterator<Item = Statement<'s>> {
+    of_type(statements, |signature_type| {
         signature_type == SignatureType::CERTIFICATION_REVOCATION
     })
 }
@@ -817,21 +857,20 @@ enum Withdrawal {
 }
 
 /// How the primary key has withdrawn what it stated over an object at
-/// `created`, with a certification revocation over the object, no older,
-/// among `revocations` that `attributed` attributes to it: the soundest such
-/// withdrawal, or `None` if none withdraws it.
+/// `created`, with one of `revocations`, its certification revocations over
+/// the object, no older: the soundest such withdrawal, or `None` if none
+/// withdraws it.
 ///
 /// Any certification revocation counts, whenever it was made, provided it
 /// is no older than what it revokes: one made earlier cannot withdraw it,
 /// since the self-signature re-certifies what it revoked.
 fn withdrawal<'s>(
     created: u32,
-    revocations: impl Iterator<Item = (&'s Signature, bool)>,
+    revocations: impl Iterator<Item = Statement<'s>>,
     policy: &Policy,
-    attributed: impl Fn(&Signature) -> bool,
 ) -> Option<Withdrawal> {
     revocations
-        .filter(|(revocation, _)| revocation.creation_time() >= created && attributed(revocation))
+        .filter(|(revocation, _)| revocation.creation_time() >= created)
         .map(|(revocation, honored)| {
             if !honored {
                 Withdrawal::Unhonored
@@ -863,9 +902,9 @@ struct SelfSignature<'a> {
 impl<'a> SelfSignature<'a> {
     /// Of `governing`, the self-signatures that govern one object, `user_id`
     /// or the primary key alone, those in force as of `now`: none if the
-    /// primary key has withdrawn them, with one of the certification
-    /// `revocations` that `attributed` attributes to it, and otherwise those
-    /// that have not expired.
+    /// primary key has withdrawn them, with one of its certification
+    /// `revocations` over the object, and otherwise those that have not
+    /// expired.
     ///
     /// Withdrawn by a revocation irongall does not honor, they stay in force
     /// unhonored, which refuses the certificate: what such a revocation
@@ -874,16 +913,15 @@ impl<'a> SelfSignature<'a> {
     /// the certificate too. One that `policy` does not accept the hash of
     /// stays in force as weak as well.
     fn in_force(
-        governing: Vec<(&'a Signature, bool)>,
+        governing: Vec<Statement<'a>>,
         user_id: Option<&'a UserId>,
-        revocations: impl Iterator<Item = (&'a Signature, bool)>,
+        revocations: impl Iterator<Item = Statement<'a>>,
         policy: &Policy,
         now: u64,
-        attributed: impl Fn(&Signature) -> bool,
     ) -> impl Iterator<Item = SelfSignature<'a>> {
-        let withdrawn = governing.first().and_then(|(signature, _)| {
-            withdrawal(signature.creation_time(), revocations, policy, attributed)
-        });
+        let withdrawn = governing
+            .first()
+            .and_then(|(signature, _)| withdrawal(signature.creation_time(), revocations, policy));
         governing
             .into_iter()
             .filter(move |_| withdrawn != Some(Withdrawal::Sound))
@@ -908,69 +946,64 @@ struct Governing<'a> {
     in_force: Vec<SelfSignature<'a>>,
     /// Whether the primary key has made a key revocation.
     revoked: bool,
+    /// Whether finding what the primary key's statements are over took more
+    /// than judging a certificate may spend, so that some may be missing:
+    /// see [`Statements::of`].
+    unbounded: bool,
 }
 
 impl<'a> Governing<'a> {
-    fn of(certificate: &'a Certificate, policy: &Policy, now: u64) -> Governing<'a> {
+    fn of(
+        certificate: &'a Certificate,
+        statements: &Statements<'a>,
+        policy: &Policy,
+        now: u64,
+    ) -> Governing<'a> {
         let primary = certificate.primary();
         let made = u64::from(primary.creation_time())..=policy.horizon(now);
-        // Statements are attributed by the signature's equation alone, so
-        // one over a hash too short for its algorithm still restricts (see
-        // the module documentation).
-        let over_key =
-            |signature: &Signature| signature.made_by(primary, Subject::Key(primary)).is_ok();
-        let signatures = (
-            certificate.primary_signatures(),
-            certificate.unhonored_primary_signatures(),
-        );
-        let revoked = of_type(signatures.0, signatures.1, |signature_type| {
+        let over_key = &statements.key;
+        let revoked = of_type(over_key, |signature_type| {
             signature_type == SignatureType::KEY_REVOCATION
         })
-        .any(|(signature, _)| over_key(signature));
+        .next()
+        .is_some();
         let direct = govern(
-            of_type(signatures.0, signatures.1, |signature_type| {
+            of_type(over_key, |signature_type| {
                 signature_type == SignatureType::DIRECT_KEY
             }),
             &made,
-            over_key,
         );
-        // A certification revocation that follows a user ID is placed with
-        // it, but may be over the primary key alone instead, revoking a
-        // direct-key signature: placement is covered by no signature, so a
-        // packet inserted before one must not change which it revokes.
-        let revocations = certification_revocations(signatures.0, signatures.1).chain(
-            certificate.user_ids().iter().flat_map(|user_id| {
-                certification_revocations(user_id.signatures(), user_id.unhonored_signatures())
-            }),
-        );
-        let mut in_force: Vec<_> =
-            SelfSignature::in_force(direct, None, revocations, policy, now, over_key).collect();
-        for user_id in certificate.user_ids() {
-            let subject = Subject::UserId {
-                key: primary,
-                user_id: user_id.value(),
-            };
-            let over_user_id = |signature: &Signature| signature.made_by(primary, subject).is_ok();
-            let signatures = (user_id.signatures(), user_id.unhonored_signatures());
-            let governing = govern(
-                of_type(signatures.0, signatures.1, is_certification),
-                &made,
-                over_user_id,
-            );
+        let mut in_force: Vec<_> = SelfSignature::in_force(
+            direct,
+            None,
+            certification_revocations(over_key),
+            policy,
+            now,
+        )
+        .collect();
+        for (user_id, over_user_id) in certificate.user_ids().iter().zip(&statements.user_ids) {
+            let governing = govern(of_type(over_user_id, is_certification), &made);
             in_force.extend(SelfSignature::in_force(
                 governing,
                 Some(user_id),
-                certification_revocations(signatures.0, signatures.1),
+                certification_revocations(over_user_id),
                 policy,
                 now,
-                over_user_id,
             ));
         }
-        Governing { in_force, revoked }
+        Governing {
+            in_force,
+            revoked,
+            unbounded: statements.unbounded,
+        }
     }
 
-    /// See [`Authority::primary_user_id`].
+    /// See [`Authority::primary_user_id`]. `None` if the primary key's
+    /// statements may not all have been found.
     fn primary_user_id(&self, policy: &Policy) -> Option<&'a UserId> {
+        if self.unbounded {
+            return None;
+        }
         let mut best: Option<(&UserId, (bool, bool, u32))> = None;
         for governing in &self.in_force {
             let Some(user_id) = governing.user_id else {
@@ -1007,6 +1040,9 @@ fn anchor(
     }
     if !policy.accepts_key(primary) {
         return Err(Reason::WeakPrimaryKey);
+    }
+    if governing.unbounded {
+        return Err(Reason::UnattributedSignatures);
     }
     let in_force = &governing.in_force;
     if in_force.iter().any(|governing| !governing.honored) {
@@ -1050,34 +1086,27 @@ fn primary_may_sign(governing: &Governing<'_>) -> Result<(), Reason> {
 
 /// The window in which `subkey`'s signatures are accepted, given that its
 /// primary key's authority lapses at `lapse`, or the reason none are.
+/// `statements` are the primary key's statements over the subkey, or `None`
+/// if the policy refuses the subkey, over which none is verified (see
+/// [`Statements::of`]).
 fn subkey_standing(
     certificate: &Certificate,
     subkey: &Subkey,
+    statements: Option<&[Statement<'_>]>,
     policy: &Policy,
     now: u64,
     lapse: Option<u64>,
 ) -> Result<Window, Reason> {
     let primary = certificate.primary();
     let key = subkey.key();
-    let subject = Subject::Subkey {
-        primary,
-        subkey: key,
-    };
-    let by_primary = |signature: &Signature| signature.made_by(primary, subject).is_ok();
-    let (honored, unhonored) = (subkey.signatures(), subkey.unhonored_signatures());
-
-    // The policy's verdict on the subkey first, since it needs no signature.
-    // Every signature over the subkey is hashed over the whole of it, and one
-    // of an algorithm irongall does not verify with, whose material it does
-    // not read, is as long as its packet: verifying them all would cost its
-    // length times their number.
-    if !policy.accepts_key(key) {
+    let Some(statements) = statements else {
         return Err(Reason::WeakSubkey);
-    }
-    if of_type(honored, unhonored, |signature_type| {
+    };
+    if of_type(statements, |signature_type| {
         signature_type == SignatureType::SUBKEY_REVOCATION
     })
-    .any(|(signature, _)| by_primary(signature))
+    .next()
+    .is_some()
     {
         return Err(Reason::SubkeyRevoked);
     }
@@ -1086,11 +1115,10 @@ fn subkey_standing(
     let created = primary.creation_time().max(key.creation_time());
     let made = u64::from(created)..=policy.horizon(now);
     let bindings = govern(
-        of_type(honored, unhonored, |signature_type| {
+        of_type(statements, |signature_type| {
             signature_type == SignatureType::SUBKEY_BINDING
         }),
         &made,
-        by_primary,
     );
     if bindings.is_empty() {
         return Err(Reason::UnboundSubkey);

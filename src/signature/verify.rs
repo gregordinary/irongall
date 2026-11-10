@@ -2,11 +2,12 @@
 //! each type of signature (RFC 9580 §5.2.4), and the check of that hash
 //! against the signature's material.
 
+use alloc::vec::Vec;
 use core::fmt;
 
 use super::{Signature, SignatureMaterial, SignatureType};
 use crate::ed25519::{self, Ed25519Error};
-use crate::hash::{Context, Digest};
+use crate::hash::{Context, Digest, HashAlgorithm};
 use crate::key::{self, KeyMaterial, PublicKey, PublicKeyAlgorithm};
 use crate::packet::Version;
 use crate::rsa::{self, RsaError};
@@ -235,21 +236,6 @@ impl Signature {
         self.check_digests(check, &digests)
     }
 
-    /// Checks that `key` made the signature over `subject`, as
-    /// [`verify`](Self::verify) does, but without the floor RFC 9580 sets on
-    /// the length of an Ed25519 signature's hash.
-    ///
-    /// The equation still establishes which key made the signature, and the
-    /// policy attributes a certificate's statements by it: one made over a
-    /// hash too short for its algorithm still restricts what the certificate
-    /// grants, and grants nothing, which the policy decides apart through
-    /// [`hash_too_short`](Self::hash_too_short).
-    pub(crate) fn made_by(&self, key: &PublicKey, subject: Subject<'_>) -> Result<(), VerifyError> {
-        self.check_subject(subject.kind())?;
-        let check = self.check_key(key)?;
-        self.check_digests(check, &self.digests(subject)?)
-    }
-
     /// Whether the signature's hash is shorter than its public-key algorithm
     /// allows: an Ed25519 signature must rest on a hash of 256 bits or more
     /// (RFC 9580 §5.2.3.3 and §5.2.3.4), so one over SHA-1 or SHA2-224 never
@@ -375,12 +361,7 @@ impl Signature {
             Subject::Key(key) => self.hash_key(&mut context, key)?,
             Subject::UserId { key, user_id } => {
                 self.hash_key(&mut context, key)?;
-                // Packet lengths are four octets, so a user ID read from one
-                // always fits.
-                let length = u32::try_from(user_id.len()).map_err(|_| VerifyError::BadSignature)?;
-                context.update(&[0xB4]);
-                context.update(&length.to_be_bytes());
-                context.update(user_id);
+                hash_user_id(&mut context, user_id)?;
             }
             Subject::Subkey { primary, subkey } => {
                 self.hash_key(&mut context, primary)?;
@@ -455,6 +436,156 @@ impl Signature {
         context.update(hashed_fields);
         context.update(&[version, 0xFF]);
         context.update(&length.to_be_bytes());
+    }
+}
+
+/// Hashes a user ID as a certification frames it (RFC 9580 §5.2.4): `0xB4`,
+/// its length in four octets, and the user ID.
+fn hash_user_id(context: &mut Context, user_id: &[u8]) -> Result<(), VerifyError> {
+    // Packet lengths are four octets, so a user ID read from one always fits.
+    let length = u32::try_from(user_id.len()).map_err(|_| VerifyError::BadSignature)?;
+    context.update(&[0xB4]);
+    context.update(&length.to_be_bytes());
+    context.update(user_id);
+    Ok(())
+}
+
+/// What a certificate's own statement is over, besides the primary key, with
+/// which every such subject begins.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Over<'a> {
+    /// The primary key alone: [`Subject::Key`].
+    Key,
+    /// One of the certificate's user IDs: [`Subject::UserId`].
+    UserId(&'a [u8]),
+    /// One of its subkeys: [`Subject::Subkey`].
+    Subkey(&'a PublicKey),
+}
+
+impl Over<'_> {
+    fn kind(self) -> Kind {
+        match self {
+            Over::Key => Kind::Key,
+            Over::UserId(_) => Kind::UserId,
+            Over::Subkey(_) => Kind::Subkey,
+        }
+    }
+}
+
+/// A certificate's primary key, checked as the maker of the certificate's
+/// statements, one after another.
+///
+/// This answers what [`Signature::verify`] answers, for a subject that
+/// begins with the primary key, through the same checks and the same
+/// framing, but for the floor on an Ed25519 signature's hash (see
+/// [`made_by`](Self::made_by)). It is kept apart because judging a
+/// certificate may check one statement over several of its parts, and every
+/// statement over each part: a version 4 signature hashes nothing before the
+/// primary key, so the key is hashed here once for each hash algorithm, and
+/// each check hashes only what follows it.
+#[derive(Debug)]
+pub(crate) struct PrimaryChecks<'k> {
+    primary: &'k PublicKey,
+    /// The primary key framed as a version 4 signature frames it, under each
+    /// hash algorithm a version 4 statement has been checked over so far,
+    /// or the reason no such statement verifies: a hash algorithm irongall
+    /// does not implement, or a key too long for the framing.
+    hashed: Vec<(HashAlgorithm, Result<Context, VerifyError>)>,
+}
+
+impl<'k> PrimaryChecks<'k> {
+    pub(crate) fn new(primary: &'k PublicKey) -> PrimaryChecks<'k> {
+        PrimaryChecks {
+            primary,
+            hashed: Vec::new(),
+        }
+    }
+
+    /// Whether the primary key can have made `signature` over anything: it
+    /// is of the key's version and public-key algorithm, of material
+    /// irongall reads, and over a hash irongall implements. Checking takes no
+    /// hashing.
+    pub(crate) fn may_have_made(&self, signature: &Signature) -> bool {
+        signature.check_key(self.primary).is_ok()
+            && Context::new(signature.hash_algorithm).is_some()
+    }
+
+    /// Checks that the primary key made `signature` over `over`, as
+    /// [`Signature::verify`] does over the subject the two make, but without
+    /// the floor RFC 9580 sets on the length of an Ed25519 signature's hash.
+    ///
+    /// The equation still establishes which key made the signature, and the
+    /// policy attributes a certificate's statements by it: one made over a
+    /// hash too short for its algorithm still restricts what the certificate
+    /// grants, and grants nothing, which the policy decides apart through
+    /// [`Signature::hash_too_short`].
+    pub(crate) fn made_by(
+        &mut self,
+        signature: &Signature,
+        over: Over<'_>,
+    ) -> Result<(), VerifyError> {
+        signature.check_subject(over.kind())?;
+        let check = signature.check_key(self.primary)?;
+        let mut context = match signature.version {
+            Version::V4 => self.hashed_primary(signature.hash_algorithm)?,
+            Version::V6 => {
+                let mut context = signature.context()?;
+                signature.hash_key(&mut context, self.primary)?;
+                context
+            }
+        };
+        match over {
+            Over::Key => {}
+            Over::UserId(user_id) => hash_user_id(&mut context, user_id)?,
+            Over::Subkey(subkey) => signature.hash_key(&mut context, subkey)?,
+        }
+        signature.check_digests(check, &signature.finish(&context, None))
+    }
+
+    /// How many octets [`made_by`](Self::made_by) hashes checking
+    /// `signature` over `over`: for version 4, what follows the primary key,
+    /// which is hashed once for each hash algorithm, and for version 6, the
+    /// salt and the primary key too; then the signature's hashed fields and
+    /// trailer.
+    pub(crate) fn cost(&self, signature: &Signature, over: Over<'_>) -> usize {
+        let framed = |key: &PublicKey| {
+            let mut octets: usize = 0;
+            key::frame_for_hashing(signature.version, key.body(), |data| {
+                octets = octets.saturating_add(data.len());
+            });
+            octets
+        };
+        let before = match signature.version {
+            Version::V4 => 0,
+            Version::V6 => signature.salt.len().saturating_add(framed(self.primary)),
+        };
+        let subject = match over {
+            Over::Key => 0,
+            Over::UserId(user_id) => user_id.len().saturating_add(5),
+            Over::Subkey(subkey) => framed(subkey),
+        };
+        before
+            .saturating_add(subject)
+            .saturating_add(signature.hashed_fields.len())
+            .saturating_add(6)
+    }
+
+    /// A context under `algorithm` that has hashed the primary key as a
+    /// version 4 signature frames it.
+    fn hashed_primary(&mut self, algorithm: HashAlgorithm) -> Result<Context, VerifyError> {
+        if let Some((_, hashed)) = self.hashed.iter().find(|(held, _)| *held == algorithm) {
+            return hashed.clone();
+        }
+        let primary = self.primary;
+        let hashed = Context::new(algorithm)
+            .ok_or(VerifyError::UnsupportedHash)
+            .and_then(|mut context| {
+                key::frame_for_hashing(Version::V4, primary.body(), |data| context.update(data))
+                    .ok_or(VerifyError::BadSignature)?;
+                Ok(context)
+            });
+        self.hashed.push((algorithm, hashed.clone()));
+        hashed
     }
 }
 
@@ -693,7 +824,7 @@ impl DocumentChecks<'_, '_> {
     /// [`DocumentHash::verify`] does, but without the floor on the length of
     /// an Ed25519 signature's hash: which key made it is the equation's to
     /// say, and whether its hash is long enough the policy's (see
-    /// [`Signature::made_by`]).
+    /// [`PrimaryChecks::made_by`]).
     pub(crate) fn made_by(&mut self, key: &PublicKey) -> Result<(), VerifyError> {
         let hash = self.hash;
         let check = hash.signature.check_key(key)?;

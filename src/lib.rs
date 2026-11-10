@@ -106,6 +106,14 @@
 //!   ID alone. GnuPG and Sequoia re-sign every user ID in force when they
 //!   change a key's expiration, so the user IDs agree, and where they do
 //!   not, the narrowest holds.
+//! - **Signatures out of place** in a certificate count over the part they
+//!   are made over. RFC 9580 §10.1 places a certification after the user ID
+//!   it certifies, and a subkey's binding or revocation after the subkey, but
+//!   no signature covers the order of a certificate's packets, so placement
+//!   does not decide what a signature is over. irongall tries such
+//!   a signature over the certificate's other parts, as Sequoia does, within
+//!   a bound the certificate's size sets, and a certificate that needs more
+//!   grants nothing.
 //! - **Old SHA-1 self-signatures**, made over a primary key before
 //!   1 February 2023, grant what they state, though a policy refuses SHA-1
 //!   elsewhere. RFC 9580 §9.5 forbids validating a recent signature that

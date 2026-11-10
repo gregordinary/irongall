@@ -3,18 +3,19 @@
 //! for the purpose, each refusal checked to be the policy's by the same
 //! shape with the defect removed.
 
-use alloc::string::ToString as _;
+use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
 use super::{Authority, Policy, Reason, Window};
-use crate::cert::Certificate;
+use crate::cert::{Certificate, UserId};
 use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyMaterial};
 use crate::keyring::Keyring;
 use crate::packet::{self, Tag, Version};
 use crate::signature::{Signature, SignatureType, Subject, SubpacketType};
 use crate::test_support::forge::{self, Key};
+use crate::test_support::work;
 
 /// When the keys of most tests were made: 2018-12-16.
 const CREATED: u32 = 1_544_987_117;
@@ -1287,8 +1288,9 @@ fn a_key_the_policy_refuses_cannot_sign() {
 
     // A subkey of an algorithm irongall does not verify with, bound but not
     // backed, and revoked: either would refuse it, but neither is verified,
-    // since each is hashed over the whole subkey.
-    let body = [&[4][..], &CREATED.to_be_bytes(), &[100], &[0x5A; 64]].concat();
+    // since each is hashed over the whole subkey, which irongall does not
+    // read and which may be as long as its packet.
+    let body = [&[4][..], &CREATED.to_be_bytes(), &[100], &[0x5A; 60_000]].concat();
     let opaque = Key::with_body(&primary, &body);
     let bound = primary
         .sign(SignatureType::SUBKEY_BINDING, CREATED)
@@ -1305,7 +1307,9 @@ fn a_key_the_policy_refuses_cannot_sign() {
             &opaque.subkey(),
             &signatures,
         ]);
-        assert_eq!(standings(&certificate, NOW)[1], Err(Reason::WeakSubkey));
+        let (judged, work) = work::of(|| standings(&certificate, NOW));
+        assert_eq!(judged[1], Err(Reason::WeakSubkey));
+        assert!(work.hashed < 1000, "{work:?}");
     }
 }
 
@@ -1721,6 +1725,331 @@ fn a_withdrawal_stands_wherever_it_is_placed() {
             Version::V6 => Err(Reason::MissingDirectKeySignature),
         };
         assert_eq!(standings(&certified, NOW)[0], expected, "{version:?}");
+    }
+}
+
+/// A statement over a user ID or a subkey restricts wherever it is placed.
+/// A packet put before it, which no signature covers, places it with
+/// another part, or with something passed over, or where its type does not
+/// belong; moved, it follows another part. Each restriction is found
+/// wherever it is, and refuses as it does in place: a revoked subkey, a
+/// newer binding that withholds signing, a newer certification that
+/// shortens the key's life or withholds signing, and the withdrawal of the
+/// one certification that bound the key.
+#[test]
+fn a_statement_restricts_wherever_it_is_placed() {
+    let mut tried = 0;
+    for version in [Version::V4, Version::V6] {
+        let primary = Key::ed25519(1, version, CREATED);
+        let subkey = Key::ed25519(2, version, CREATED);
+        let documents = [signed(&primary, SIGNED), signed(&subkey, SIGNED)];
+        let later = CREATED + DAY;
+        let second = "second <second@example.invalid>";
+        let direct = primary
+            .sign(SignatureType::DIRECT_KEY, CREATED)
+            .key_flags(CERTIFY | SIGN)
+            .over_key(&primary);
+        // The packets before the restriction, and the document it refuses.
+        let base = |with_direct: bool| {
+            let mut packets = vec![primary.primary()];
+            if with_direct {
+                packets.push(direct.clone());
+            }
+            packets.extend([
+                forge::user_id(USER_ID),
+                certification(&primary, CREATED, Some(CERTIFY | SIGN), None),
+                forge::user_id(second),
+                certification_of(&primary, second, CREATED, Some(CERTIFY | SIGN), None),
+                subkey.subkey(),
+                binding(&primary, &subkey, CREATED, SIGN),
+            ]);
+            packets
+        };
+        let cases = [
+            (
+                base(true),
+                primary
+                    .sign(SignatureType::SUBKEY_REVOCATION, later)
+                    .over_subkey(&primary, &subkey),
+                1,
+                Reason::SubkeyRevoked,
+            ),
+            (
+                base(true),
+                primary
+                    .sign(SignatureType::SUBKEY_BINDING, later)
+                    .key_flags(ENCRYPT)
+                    .over_subkey(&primary, &subkey),
+                1,
+                Reason::SubkeyMayNotSign,
+            ),
+            (
+                base(true),
+                certification(&primary, later, Some(CERTIFY | SIGN), Some(TWO_YEARS)),
+                0,
+                Reason::AfterKeyExpiration,
+            ),
+            (
+                base(true),
+                certification_of(&primary, second, later, Some(CERTIFY), None),
+                0,
+                Reason::PrimaryMayNotSign,
+            ),
+            (
+                // Without a direct-key signature, so that the user IDs
+                // alone bind the key: the second's certification withdrawn,
+                // and the restriction withdrawing the first's.
+                [
+                    &base(false)[..5],
+                    &[primary
+                        .sign(SignatureType::CERTIFICATION_REVOCATION, later)
+                        .over_user_id(&primary, second)],
+                ]
+                .concat(),
+                primary
+                    .sign(SignatureType::CERTIFICATION_REVOCATION, later)
+                    .over_user_id(&primary, USER_ID),
+                0,
+                match version {
+                    Version::V4 => Reason::MissingSelfSignature,
+                    Version::V6 => Reason::MissingDirectKeySignature,
+                },
+            ),
+        ];
+        let inserted = [
+            forge::user_id("inserted <inserted@example.invalid>"),
+            forge::user_id(USER_ID),
+            forge::user_id(second),
+            forge::user_id(&"x".repeat(2049)),
+            forge::packet(Tag::USER_ATTRIBUTE, &[0x05, 0x01, 0x00]),
+            Key::ed25519(9, version, CREATED).subkey(),
+            subkey.subkey(),
+            // A subkey of the other version, and one that does not read.
+            Key::ed25519(9, other_version(version), CREATED).subkey(),
+            forge::packet(Tag::PUBLIC_SUBKEY, &[0x04, 0, 0]),
+        ];
+        for (packets, restriction, document, reason) in cases {
+            let parts = |packets: &[Vec<u8>]| {
+                let parts: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
+                forge::certificate(&parts)
+            };
+            let document = &documents[document];
+            if version == Version::V4 || reason != Reason::MissingDirectKeySignature {
+                assert!(verdict(&parts(&packets), &[document]).is_ok(), "{reason:?}");
+            }
+            let mut rewrites = Vec::new();
+            // In place, then after each packet: moved before the parts, or
+            // after another part or its signatures.
+            for at in 1..=packets.len() {
+                let mut rewrite = packets.clone();
+                rewrite.insert(at, restriction.clone());
+                rewrites.push(rewrite);
+            }
+            for packet in &inserted {
+                let mut rewrite = packets.clone();
+                rewrite.extend([packet.clone(), restriction.clone()]);
+                rewrites.push(rewrite);
+            }
+            for rewrite in rewrites {
+                assert_eq!(
+                    verdict(&parts(&rewrite), &[document]),
+                    Err(reason),
+                    "{version:?} {reason:?}\n{:?}",
+                    parts(&rewrite)
+                );
+                // Combined with a copy that lacks the restriction, in either
+                // order, it still restricts.
+                for keyring in [
+                    Keyring::new([parts(&packets), parts(&rewrite)]),
+                    Keyring::new([parts(&rewrite), parts(&packets)]),
+                ] {
+                    assert_eq!(
+                        judge(&keyring.certificates()[0], &[document], &Policy::new(), NOW),
+                        Err(reason),
+                        "{version:?} {reason:?} combined"
+                    );
+                }
+                tried += 1;
+            }
+        }
+    }
+    assert_eq!(tried, 2 * (4 * (8 + 9) + (6 + 9)));
+}
+
+/// A certificate of `primary`, bound by a direct-key signature to certify
+/// and sign, with a user ID for each of `user_ids`, the first certified by
+/// the primary key, and `foreign` placed after it: certifications by another
+/// key, which verify over nothing as the primary key's, and so are tried
+/// over every user ID.
+fn with_foreign(primary: &Key, user_ids: &[String], foreign: &[Vec<u8>]) -> Certificate {
+    let mut packets = vec![
+        primary.primary(),
+        primary
+            .sign(SignatureType::DIRECT_KEY, CREATED)
+            .key_flags(CERTIFY | SIGN)
+            .over_key(primary),
+    ];
+    for (at, user_id) in user_ids.iter().enumerate() {
+        packets.push(forge::user_id(user_id));
+        if at == 0 {
+            packets.push(certification_of(primary, user_id, CREATED, None, None));
+            packets.extend_from_slice(foreign);
+        }
+    }
+    let parts: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
+    forge::certificate(&parts)
+}
+
+/// The octets of every signature `certificate` holds, as the search for
+/// what they are over is bounded by.
+fn signature_octets(certificate: &Certificate) -> usize {
+    let mut all: Vec<&Signature> = certificate.primary_signatures().iter().collect();
+    for user_id in certificate.user_ids() {
+        all.extend(user_id.signatures());
+    }
+    let (unplaced, _) = certificate.unplaced_signatures();
+    all.extend(unplaced);
+    all.iter().map(|signature| signature.length()).sum()
+}
+
+/// Searching for what a certificate's signatures are over is bounded by the
+/// certificate's own size. Certifications another key made over user IDs,
+/// which every certificate may carry, are each tried over every user ID:
+/// a few hundred over several user IDs are well within the bound, and the
+/// certificate is judged as it would be without them. The same signatures,
+/// each tried over hundreds of user IDs that cost little to add, are not,
+/// and the certificate grants nothing. Holding a certificate twice changes
+/// neither, even at the point where one turns into the other.
+#[test]
+fn the_search_for_what_a_signature_is_over_is_bounded() {
+    let primary = ed25519(1);
+    let stranger = ed25519(5);
+    let document = signed(&primary, SIGNED);
+    let user_ids =
+        |count: usize| -> Vec<String> { (0..count).map(|at| format!("u{at}")).collect() };
+    let foreign = |count: usize, user_id: &str| -> Vec<Vec<u8>> {
+        (0..count)
+            .map(|at| {
+                stranger
+                    .sign(SignatureType::GENERIC_CERTIFICATION, CREATED + at as u32)
+                    .over_user_id(&primary, user_id)
+            })
+            .collect()
+    };
+
+    let carried = with_foreign(&primary, &user_ids(8), &foreign(200, "u0"));
+    let (verdict_carried, work) = work::of(|| verdict(&carried, &[&document]));
+    assert_eq!(verdict_carried, Ok(primary.public().fingerprint()));
+    let authority = Authority::new(&carried, &Policy::new(), NOW);
+    assert_eq!(
+        authority.primary_user_id().map(UserId::value),
+        Some(&b"u0"[..])
+    );
+    // Each is checked by its equation once, over the user ID it follows,
+    // where its hash prefix matches, and over the seven others its prefix
+    // rules it out: the rest are the primary key's two self-signatures and
+    // the document's signature.
+    assert_eq!(work.operations, 200 + 3);
+    let bound = 128 * signature_octets(&carried) as u64;
+    assert!(work.hashed < bound, "{work:?} {bound}");
+
+    let crowded = with_foreign(&primary, &user_ids(300), &foreign(50, "u0"));
+    let (refused, work) = work::of(|| verdict(&crowded, &[&document]));
+    assert_eq!(refused, Err(Reason::UnattributedSignatures));
+    assert!(
+        work.hashed <= 128 * signature_octets(&crowded) as u64 + 4096,
+        "{work:?}"
+    );
+    let authority = Authority::new(&crowded, &Policy::new(), NOW);
+    assert_eq!(authority.lapse(), Err(Reason::UnattributedSignatures));
+    assert_eq!(authority.primary_user_id(), None);
+
+    // Ten such certifications, tried over ever more user IDs.
+    let mut turned = None;
+    for count in 60..140 {
+        let certificate = with_foreign(&primary, &user_ids(count), &foreign(10, "u0"));
+        let once = standings(&certificate, NOW);
+        let keyring = Keyring::new([certificate.clone(), certificate]);
+        assert_eq!(standings(&keyring.certificates()[0], NOW), once, "{count}");
+        let unbounded = once[0] == Err(Reason::UnattributedSignatures);
+        match turned {
+            None if unbounded => turned = Some(count),
+            None => assert!(once[0].is_ok()),
+            Some(_) => assert!(unbounded, "{count}"),
+        }
+    }
+    // Every try is charged what it hashes and a fixed overhead, so where the
+    // bound falls is exact: a change to either moves it.
+    assert_eq!(turned, Some(109));
+}
+
+/// A user ID over which `signature`, a version 4 certification, has the
+/// hash prefix it carries, though not the key's equation: one found by
+/// trying names, as anyone can, since everything a signature is hashed
+/// over is public.
+fn colliding_user_id(primary: &Key, signature: &Signature, from: usize) -> (String, usize) {
+    let trailer = |fields: &[u8]| {
+        let length = u32::try_from(fields.len()).unwrap().to_be_bytes();
+        [fields, &[4, 0xFF][..], &length].concat()
+    };
+    let key = crate::test_support::hashed_key(primary.public().body());
+    let fields = trailer(signature.hashed_fields());
+    (from..)
+        .map(|at| (format!("collides {at}"), at))
+        .find(|(user_id, _)| {
+            let data = [
+                &key[..],
+                &crate::test_support::hashed_user_id(user_id.as_bytes()),
+                &fields,
+            ]
+            .concat();
+            let digest = crate::test_support::digest(signature.hash_algorithm(), &data);
+            digest.as_bytes()[..2] == signature.hash_prefix()
+        })
+        .unwrap()
+}
+
+/// The search checks no more signatures by their equation than the
+/// certificate holds. A signature's hash prefix lets an equation be
+/// skipped, but anyone can find user IDs over which a signature's prefix
+/// matches, so each is tried by its equation: past the bound, the
+/// certificate grants nothing.
+#[test]
+fn the_search_checks_no_more_equations_than_there_are_signatures() {
+    let primary = ed25519(1);
+    let stranger = ed25519(5);
+    let document = signed(&primary, SIGNED);
+    let foreign = stranger
+        .sign(SignatureType::GENERIC_CERTIFICATION, CREATED)
+        .over_user_id(&primary, "u0");
+    let signature = forge::read(&foreign);
+    let mut colliding = Vec::new();
+    let mut from = 0;
+    for _ in 0..4 {
+        let (user_id, at) = colliding_user_id(&primary, &signature, from);
+        colliding.push(user_id);
+        from = at + 1;
+    }
+    // The direct-key signature, the first user ID's certification, and the
+    // foreign one: three equations, and each user ID a collision costs one.
+    for (count, expected) in [
+        (3, Ok(primary.public().fingerprint())),
+        (4, Err(Reason::UnattributedSignatures)),
+    ] {
+        let mut user_ids = vec!["u0".to_string()];
+        user_ids.extend(colliding[..count].iter().cloned());
+        let certificate = with_foreign(&primary, &user_ids, core::slice::from_ref(&foreign));
+        let (judged, work) = work::of(|| verdict(&certificate, &[&document]));
+        assert_eq!(judged, expected, "{count}");
+        assert!(work.operations <= 3 + 4 + 1, "{work:?}");
+    }
+}
+
+/// The other of the two key versions.
+fn other_version(version: Version) -> Version {
+    match version {
+        Version::V4 => Version::V6,
+        Version::V6 => Version::V4,
     }
 }
 
@@ -2914,9 +3243,9 @@ fn nothing_dated_before_the_keys_counts() {
 /// statement a certificate makes about itself, as their packets: a revoked
 /// subkey, a subkey whose newer binding withholds signing, a revoked
 /// certificate, a withdrawn direct-key signature, a newer certification that
-/// shortens the key's life, an expiring back-signature, a newer direct-key
-/// signature that withholds signing, and a withdrawn user ID that alone bound
-/// the key.
+/// shortens the key's life, an expiring back-signature, in the binding's
+/// unhashed area and in its hashed area, a newer direct-key signature that
+/// withholds signing, and a withdrawn user ID that alone bound the key.
 fn restricted(version: Version) -> Vec<Vec<Vec<u8>>> {
     let primary = Key::ed25519(1, version, CREATED);
     let subkey = Key::ed25519(2, version, CREATED);
@@ -2939,16 +3268,13 @@ fn restricted(version: Version) -> Vec<Vec<Vec<u8>>> {
         packets.extend_from_slice(extra);
         packets
     };
-    let expiring_back = primary
-        .sign(SignatureType::SUBKEY_BINDING, later)
-        .key_flags(SIGN)
-        .embed(
-            &subkey
-                .sign(SignatureType::PRIMARY_KEY_BINDING, later)
-                .expiration(TWO_YEARS)
-                .over_subkey(&primary, &subkey),
-        )
+    let expiring = subkey
+        .sign(SignatureType::PRIMARY_KEY_BINDING, later)
+        .expiration(TWO_YEARS)
         .over_subkey(&primary, &subkey);
+    let expiring_back =
+        |signing: forge::Signing<'_>| signing.key_flags(SIGN).over_subkey(&primary, &subkey);
+    let newer_binding = || primary.sign(SignatureType::SUBKEY_BINDING, later);
     vec![
         base(&[primary
             .sign(SignatureType::SUBKEY_REVOCATION, later)
@@ -2971,7 +3297,8 @@ fn restricted(version: Version) -> Vec<Vec<Vec<u8>>> {
             );
             packets
         },
-        base(&[expiring_back]),
+        base(&[expiring_back(newer_binding().embed(&expiring))]),
+        base(&[expiring_back(newer_binding().embed_hashed(&expiring))]),
         base(&[direct(later, CERTIFY)]),
         vec![
             primary.primary(),
@@ -3015,12 +3342,11 @@ fn within(after: Result<Window, Reason>, before: Result<Window, Reason>) -> bool
 /// The certificates made from `packets` by rewriting what none of their
 /// signatures covers: repeating a user ID or subkey with only one of the
 /// signatures over it, replacing or damaging a signature's unhashed area,
-/// and putting a User ID, User Attribute, or Subkey packet before a
-/// signature over the primary key alone. The packets are of a certificate
-/// of `version`.
+/// putting a User ID, User Attribute, or Subkey packet before a signature,
+/// and moving a signature to follow the primary key or to the end. The
+/// packets are of a certificate of `version`.
 fn rewritten(packets: &[Vec<u8>], version: Version) -> Vec<Vec<Vec<u8>>> {
     let tag = |packet: &[u8]| packet::packets(packet).next().unwrap().unwrap().tag();
-    let signature_type = |packet: &[u8]| forge::read(packet).signature_type();
     let mut rewrites = Vec::new();
     for (at, part) in packets.iter().enumerate() {
         match tag(part) {
@@ -3050,29 +3376,20 @@ fn rewritten(packets: &[Vec<u8>], version: Version) -> Vec<Vec<Vec<u8>>> {
                     rewrite[at] = signature;
                     rewrites.push(rewrite);
                 }
-                let over_key = match signature_type(part) {
-                    SignatureType::DIRECT_KEY | SignatureType::KEY_REVOCATION => true,
-                    // Over the key unless it follows a user ID.
-                    SignatureType::CERTIFICATION_REVOCATION => {
-                        packets[..at]
-                            .iter()
-                            .rev()
-                            .map(|packet| tag(packet))
-                            .find(|&tag| tag != Tag::SIGNATURE)
-                            != Some(Tag::USER_ID)
-                    }
-                    _ => false,
-                };
-                if over_key {
-                    for inserted in [
-                        forge::user_id("inserted <inserted@example.invalid>"),
-                        forge::packet(Tag::USER_ATTRIBUTE, &[0x05, 0x01, 0x00]),
-                        Key::ed25519(9, version, CREATED).subkey(),
-                    ] {
-                        let mut rewrite = packets.to_vec();
-                        rewrite.insert(at, inserted);
-                        rewrites.push(rewrite);
-                    }
+                for inserted in [
+                    forge::user_id("inserted <inserted@example.invalid>"),
+                    forge::packet(Tag::USER_ATTRIBUTE, &[0x05, 0x01, 0x00]),
+                    Key::ed25519(9, version, CREATED).subkey(),
+                ] {
+                    let mut rewrite = packets.to_vec();
+                    rewrite.insert(at, inserted);
+                    rewrites.push(rewrite);
+                }
+                for to in [1, packets.len() - 1] {
+                    let mut rewrite = packets.to_vec();
+                    let moved = rewrite.remove(at);
+                    rewrite.insert(to, moved);
+                    rewrites.push(rewrite);
                 }
             }
             _ => {}
@@ -3084,9 +3401,9 @@ fn rewritten(packets: &[Vec<u8>], version: Version) -> Vec<Vec<Vec<u8>>> {
 /// Rewriting what none of a certificate's signatures covers, which anyone
 /// who handles the certificate can do, widens nothing it grants: repeating a
 /// part with only an older signature over it, changing or damaging a
-/// signature's unhashed area, inserting a packet before a statement over the
-/// primary key, or combining the certificate with an older copy of itself,
-/// in either order. Each certificate here restricts what it grants by
+/// signature's unhashed area, inserting a packet before a statement or
+/// moving it, or combining the certificate with an older copy of itself, in
+/// either order. Each certificate here restricts what it grants by
 /// another kind of statement, and every rewrite is tried at every place.
 #[test]
 fn what_no_signature_covers_widens_nothing() {
@@ -3130,7 +3447,7 @@ fn what_no_signature_covers_widens_nothing() {
             }
         }
     }
-    assert_eq!(tried, 668);
+    assert_eq!(tried, 1036);
 }
 
 #[test]

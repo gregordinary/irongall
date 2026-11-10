@@ -5,7 +5,7 @@
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
-use super::{Kind, LineEndings, Subject, VerifyError, kinds};
+use super::{Kind, LineEndings, Over, PrimaryChecks, Subject, VerifyError, kinds};
 use crate::armor;
 use crate::cert::{self, Certificate};
 use crate::hash::{Context, Digest, HashAlgorithm, HashFunction as _, Sha256};
@@ -14,7 +14,8 @@ use crate::packet::{self, Packet, Version};
 use crate::signature::{Signature, SignatureType};
 use crate::test_support::rfc9580::{A1_KEY, A2_SIGNATURE, A3_CERTIFICATE, A6_SIGNATURE, A6_TEXT};
 use crate::test_support::{
-    Rng, digest, forge, hashed_key, hashed_user_id, signature_digest, signature_input, vector_bytes,
+    Rng, digest, forge, hashed_key, hashed_user_id, signature_digest, signature_input,
+    vector_bytes, work,
 };
 
 fn dearmor(armored: &str) -> Vec<u8> {
@@ -794,9 +795,9 @@ fn a_document_hashed_in_pieces() {
 
 /// An Ed25519 signature over a hash shorter than 256 bits, made by the key:
 /// `verify` refuses it, as RFC 9580 §5.2.3.3 and §5.2.3.4 require, whether
-/// the document is hashed whole or in pieces, while `made_by` attributes it
-/// to the key that made it, and to no other. GnuPG made the first, over
-/// SHA2-224, and the forge the rest.
+/// the document is hashed whole or in pieces, while the check of which key
+/// made it attributes it to the key that did, and to no other. GnuPG made
+/// the first, over SHA2-224, and the forge the rest.
 #[test]
 fn a_hash_too_short_for_ed25519_is_attributed_but_does_not_verify() {
     let document = vector_bytes("gnupg/document.txt");
@@ -846,12 +847,6 @@ fn a_hash_too_short_for_ed25519_is_attributed_but_does_not_verify() {
         };
         let subject = Subject::Document(&document);
         assert_eq!(signature.verify(key, subject), expected, "{algorithm}");
-        assert_eq!(signature.made_by(key, subject), Ok(()), "{algorithm}");
-        assert_eq!(
-            signature.made_by(other, subject),
-            Err(VerifyError::BadSignature),
-            "{algorithm}"
-        );
         let mut hash = signature.document_hash().unwrap();
         hash.update(&document);
         assert_eq!(hash.verify(key), expected, "{algorithm}");
@@ -877,4 +872,149 @@ fn a_hash_too_short_for_ed25519_is_attributed_but_does_not_verify() {
         signature.verify(rsa.public(), Subject::Document(&document)),
         Ok(())
     );
+}
+
+/// Checking a primary key's statements one after another answers as
+/// `verify` does, over every kind of part a statement may be over and every
+/// part of that kind, except that a hash too short for an Ed25519 signature
+/// is attributed rather than refused. Its key hashed once for each hash
+/// algorithm, a version 4 check hashes what follows the key, and the count
+/// it gives of what it hashes is exact.
+#[test]
+fn a_primary_keys_statements_are_checked_as_verify_checks_them() {
+    let created = 1_700_000_000;
+    let mut primaries = vec![forge::Key::rsa(created)];
+    for version in [Version::V4, Version::V6] {
+        primaries.push(forge::Key::ed25519(1, version, created));
+    }
+    let mut cases = 0;
+    for primary in &primaries {
+        let version = primary.public().version();
+        let subkeys = [2, 3].map(|seed| forge::Key::ed25519(seed, version, created));
+        let user_ids = ["archive", "other"];
+        let mut hashes = vec![HashAlgorithm::SHA256, HashAlgorithm::SHA512];
+        hashes.push(match version {
+            Version::V4 => HashAlgorithm::SHA1,
+            Version::V6 => HashAlgorithm::SHA224,
+        });
+        let mut statements = Vec::new();
+        for &hash in &hashes {
+            let sign = |signature_type| primary.sign(signature_type, created).hash(hash);
+            // Each with the index of the part it is over, in `parts`.
+            statements.extend([
+                (sign(SignatureType::DIRECT_KEY).over_key(primary), 0),
+                (
+                    sign(SignatureType::CERTIFICATION_REVOCATION).over_key(primary),
+                    0,
+                ),
+                (
+                    sign(SignatureType::POSITIVE_CERTIFICATION).over_user_id(primary, user_ids[0]),
+                    1,
+                ),
+                (
+                    sign(SignatureType::CERTIFICATION_REVOCATION)
+                        .over_user_id(primary, user_ids[1]),
+                    2,
+                ),
+                (
+                    sign(SignatureType::SUBKEY_BINDING).over_subkey(primary, &subkeys[0]),
+                    3,
+                ),
+                (
+                    sign(SignatureType::SUBKEY_REVOCATION).over_subkey(primary, &subkeys[1]),
+                    4,
+                ),
+            ]);
+        }
+        let key = primary.public();
+        let parts = [
+            (Over::Key, Subject::Key(key)),
+            (
+                Over::UserId(user_ids[0].as_bytes()),
+                Subject::UserId {
+                    key,
+                    user_id: user_ids[0].as_bytes(),
+                },
+            ),
+            (
+                Over::UserId(user_ids[1].as_bytes()),
+                Subject::UserId {
+                    key,
+                    user_id: user_ids[1].as_bytes(),
+                },
+            ),
+            (
+                Over::Subkey(subkeys[0].public()),
+                Subject::Subkey {
+                    primary: key,
+                    subkey: subkeys[0].public(),
+                },
+            ),
+            (
+                Over::Subkey(subkeys[1].public()),
+                Subject::Subkey {
+                    primary: key,
+                    subkey: subkeys[1].public(),
+                },
+            ),
+        ];
+        let mut shared = PrimaryChecks::new(key);
+        let mut hashed_once = Vec::new();
+        let mut verified = 0;
+        for (statement, over_part) in &statements {
+            let signature = forge::read(statement);
+            assert!(shared.may_have_made(&signature));
+            for (part, (over, subject)) in parts.into_iter().enumerate() {
+                // `verify` refuses a hash too short before it hashes the
+                // subject, and the check of who made it does not.
+                let expected = match signature.verify(key, subject) {
+                    Err(VerifyError::HashTooShort) if part == *over_part => Ok(()),
+                    Err(VerifyError::HashTooShort) => Err(VerifyError::HashPrefixMismatch),
+                    verdict => verdict,
+                };
+                assert_eq!(expected.is_ok(), part == *over_part);
+                assert_eq!(PrimaryChecks::new(key).made_by(&signature, over), expected);
+                let (made, work) = work::of(|| shared.made_by(&signature, over));
+                assert_eq!(made, expected);
+                if expected != Err(VerifyError::WrongSubject) {
+                    let mut cost = shared.cost(&signature, over);
+                    let algorithm = signature.hash_algorithm();
+                    if version == Version::V4 && !hashed_once.contains(&algorithm) {
+                        hashed_once.push(algorithm);
+                        cost += hashed_key(key.body()).len();
+                    }
+                    assert_eq!(work.hashed, cost as u64);
+                }
+                verified += usize::from(made.is_ok());
+                cases += 1;
+            }
+        }
+        assert_eq!(verified, statements.len());
+        if version == Version::V4 {
+            assert_eq!(hashed_once.len(), hashes.len());
+        }
+        // Another key's signature over the primary key: one of another
+        // algorithm is not one the primary key may have made, and one of
+        // its algorithm fails by its equation.
+        let other = forge::Key::ed25519(9, version, created);
+        let foreign = forge::read(
+            &other
+                .sign(SignatureType::DIRECT_KEY, created)
+                .over_key(primary),
+        );
+        assert_eq!(
+            shared.may_have_made(&foreign),
+            primary.public().algorithm() == other.public().algorithm()
+        );
+        assert_eq!(
+            shared.made_by(&foreign, Over::Key),
+            Err(
+                match primary.public().algorithm() == other.public().algorithm() {
+                    true => VerifyError::BadSignature,
+                    false => VerifyError::AlgorithmMismatch,
+                }
+            )
+        );
+    }
+    assert_eq!(cases, 3 * 18 * 5);
 }

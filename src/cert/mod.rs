@@ -83,6 +83,16 @@
 //! obtained at different times: [`certificates`] reads each as it is, and
 //! [`Keyring::new`](crate::keyring::Keyring::new) combines them.
 //!
+//! Where a signature is placed is a guess at what it is over, since no
+//! signature covers the order of a certificate's packets, and judging a
+//! certificate does not rely on it: the [`policy`](crate::policy) counts
+//! each of the primary key's statements over the part it verifies over,
+//! wherever it is placed. So a certification, subkey binding, or subkey
+//! revocation that cannot be placed with a part of its kind, because it
+//! follows something passed over or its type does not belong where it is,
+//! is kept with the certificate, though no part lists it, and is weighed
+//! there.
+//!
 //! # What is passed over, and what is refused
 //!
 //! A part of a certificate irongall cannot use is passed over, and the
@@ -133,6 +143,12 @@ pub struct Certificate {
     primary_signatures: Signatures,
     user_ids: Vec<UserId>,
     subkeys: Vec<Subkey>,
+    /// The certifications, subkey bindings, and subkey revocations that are
+    /// not placed with a part of their kind: those after something passed
+    /// over, and those where their type does not belong. Judging the
+    /// certificate tries each over every part it may be over (see the
+    /// [module documentation](self)).
+    unplaced: Signatures,
     skipped: Vec<PacketError>,
 }
 
@@ -172,6 +188,13 @@ impl Certificate {
     /// not belong where they are, and subkeys of the wrong version.
     pub fn skipped(&self) -> &[PacketError] {
         &self.skipped
+    }
+
+    /// The certifications, subkey bindings, and subkey revocations placed
+    /// with no part, those irongall honors first: see
+    /// [`Certificate::unplaced`].
+    pub(crate) fn unplaced_signatures(&self) -> (&[Signature], &[Signature]) {
+        (&self.unplaced.honored, &self.unplaced.unhonored)
     }
 }
 
@@ -409,6 +432,7 @@ impl Assembly {
             primary_signatures: Signatures::default(),
             user_ids: Vec::new(),
             subkeys: Vec::new(),
+            unplaced: Signatures::default(),
             skipped: Vec::new(),
         })
     }
@@ -421,6 +445,7 @@ impl Assembly {
             primary_signatures,
             user_ids,
             subkeys,
+            unplaced,
             skipped,
         } = certificate;
         let mut assembly = Assembly {
@@ -429,6 +454,7 @@ impl Assembly {
                 primary_signatures,
                 user_ids: Vec::with_capacity(user_ids.len()),
                 subkeys: Vec::with_capacity(subkeys.len()),
+                unplaced,
                 skipped,
             },
             place: Place::Primary,
@@ -449,6 +475,9 @@ impl Assembly {
         self.place = Place::Primary;
         self.extend(other.primary_signatures);
         self.take(other.user_ids, other.subkeys);
+        let unplaced = &mut self.certificate.unplaced;
+        unplaced.honored.extend(other.unplaced.honored);
+        unplaced.unhonored.extend(other.unplaced.unhonored);
         self.certificate.skipped.extend(other.skipped);
         self.place = Place::PassedOver;
     }
@@ -566,7 +595,10 @@ impl Assembly {
     /// Places a signature with what it is over, or passes over it.
     ///
     /// A signature refused only for what irongall cannot honor is still
-    /// placed, apart from the others: see [`Signatures::unhonored`].
+    /// placed, apart from the others: see [`Signatures::unhonored`]. A
+    /// certification, subkey binding, or subkey revocation that cannot be
+    /// placed with a part of its kind is kept unplaced (see
+    /// [`Certificate::unplaced`]).
     fn add_signature(&mut self, packet: &Packet<'_>) {
         let certificate = &mut self.certificate;
         let (signature, refusal) = match Signature::from_packet(packet) {
@@ -603,8 +635,13 @@ impl Assembly {
                 SignatureType::SUBKEY_BINDING | SignatureType::SUBKEY_REVOCATION,
                 place @ Place::Subkey(_),
             ) => Some(place),
-            // The signatures of something passed over go with it.
-            (_, Place::PassedOver) => return,
+            // The signatures of something passed over go with it, and are
+            // not recorded as passed over themselves, but a statement among
+            // them is kept, since the policy places it by what it is over.
+            (_, Place::PassedOver) => {
+                self.unplace(signature, honored);
+                return;
+            }
             _ => None,
         };
         if let Some(error) = refusal {
@@ -613,12 +650,39 @@ impl Assembly {
         match place.and_then(|place| self.signatures(place)) {
             Some(signatures) if honored => signatures.honored.push(signature),
             Some(signatures) => signatures.unhonored.push(signature),
-            // An unhonored signature's refusal is already recorded.
-            None if honored => self
-                .certificate
-                .skipped
-                .push(packet.error(PacketErrorKind::MisplacedSignature)),
-            None => {}
+            None => {
+                // An unhonored signature's refusal is already recorded.
+                if honored {
+                    self.certificate
+                        .skipped
+                        .push(packet.error(PacketErrorKind::MisplacedSignature));
+                }
+                self.unplace(signature, honored);
+            }
+        }
+    }
+
+    /// Keeps `signature`, placed with no part, if it is a statement over a
+    /// user ID or a subkey: a certification, a subkey binding, or a subkey
+    /// revocation. A certification revocation is never unplaced, since one
+    /// that follows no user ID is placed with the primary key.
+    fn unplace(&mut self, signature: Signature, honored: bool) {
+        if !matches!(
+            signature.signature_type(),
+            SignatureType::GENERIC_CERTIFICATION
+                | SignatureType::PERSONA_CERTIFICATION
+                | SignatureType::CASUAL_CERTIFICATION
+                | SignatureType::POSITIVE_CERTIFICATION
+                | SignatureType::SUBKEY_BINDING
+                | SignatureType::SUBKEY_REVOCATION
+        ) {
+            return;
+        }
+        let unplaced = &mut self.certificate.unplaced;
+        if honored {
+            unplaced.honored.push(signature);
+        } else {
+            unplaced.unhonored.push(signature);
         }
     }
 }

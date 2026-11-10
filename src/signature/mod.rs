@@ -80,8 +80,8 @@ mod tests;
 use alloc::vec::Vec;
 
 pub use subpacket::{KeyFlags, RevocationCode, RevocationReason, Subpacket, SubpacketType};
-pub(crate) use verify::check_verifying_key;
 pub use verify::{DocumentHash, Subject, VerifyError};
+pub(crate) use verify::{Over, PrimaryChecks, check_verifying_key};
 
 use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyId, PublicKeyAlgorithm};
@@ -170,6 +170,8 @@ pub struct Signature {
     /// The body from the version through the hashed subpackets: the part of
     /// the signature its own hash covers (RFC 9580 §5.2.4).
     hashed_fields: Vec<u8>,
+    /// The length of the body, from the version through the material.
+    length: usize,
 }
 
 impl Signature {
@@ -280,6 +282,7 @@ impl Signature {
         };
         let material = read_material(&mut fields, public_key_algorithm, version)?;
         fields.finish()?;
+        let length = fields.offset().saturating_sub(at);
 
         Ok(Signature {
             version,
@@ -294,6 +297,7 @@ impl Signature {
             creation_time,
             embedded: embedded_signatures,
             hashed_fields,
+            length,
         })
     }
 
@@ -425,6 +429,12 @@ impl Signature {
     /// through the hashed subpackets (RFC 9580 §5.2.4).
     pub(crate) fn hashed_fields(&self) -> &[u8] {
         &self.hashed_fields
+    }
+
+    /// The length of the signature's body, in octets: of its packet's body,
+    /// or of the subpacket it is embedded in.
+    pub(crate) fn length(&self) -> usize {
+        self.length
     }
 
     /// The body of the last hashed subpacket of `subpacket_type`.

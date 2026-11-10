@@ -851,6 +851,13 @@ pub(crate) mod forge {
             self.unhashed(SubpacketType::EMBEDDED_SIGNATURE, packet.body())
         }
 
+        /// Embeds the signature `packet` holds, in the hashed area, where
+        /// Sequoia puts a back-signature, so that the binding covers it.
+        pub(crate) fn embed_hashed(self, signature: &[u8]) -> Self {
+            let packet = packet::packets(signature).next().unwrap().unwrap();
+            self.hashed(SubpacketType::EMBEDDED_SIGNATURE, packet.body())
+        }
+
         /// Adds a hashed notation marked critical, which irongall does not
         /// honor.
         pub(crate) fn critical_notation(self) -> Self {

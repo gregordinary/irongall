@@ -11,8 +11,23 @@ public API changes, since a verifier's verdicts are part of its contract.
 
 ## [Unreleased]
 
+### Added
+
+- `policy::Reason::UnattributedSignatures`, the reason a certificate grants
+  nothing when it holds more signatures out of place than judging it tries
+  to place.
+
 ### Security
 
+- A certificate's statements over its user IDs and subkeys, such as a
+  subkey's revocation or a newer binding or certification, count wherever
+  they are placed: one that does not verify over the part it follows is
+  tried over the certificate's other parts. The search is bounded by the
+  size of the certificate's signatures, and a certificate that needs more
+  grants nothing, refused as `Reason::UnattributedSignatures`. Earlier
+  releases weighed such a statement only over the part it follows, which
+  an unsigned change to the certificate could alter, so the certificate
+  could grant what the statement withdrew.
 - Verifying a document against a keyring finishes each signature's hash
   once, however many keys it is tried with, and looks up the keys its
   issuers name. Earlier releases could do work in proportion to a

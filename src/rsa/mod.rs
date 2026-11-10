@@ -114,11 +114,13 @@ impl PublicKey {
     ///
     /// # Errors
     ///
+    /// The first of these that applies, in this order:
     /// [`RsaError::ModulusTooShort`] or [`RsaError::ModulusTooLong`] for a
     /// modulus narrower than 2048 bits or wider than 8192,
+    /// [`RsaError::InvalidKey`] for an even modulus,
     /// [`RsaError::ExponentTooLarge`] for an exponent larger than 2^33 - 1,
-    /// and [`RsaError::InvalidKey`] for an even modulus, or an exponent that
-    /// is even or less than 3.
+    /// whether even or odd, and [`RsaError::InvalidKey`] for an exponent
+    /// that is even or less than 3.
     pub fn new(modulus: &[u8], exponent: &[u8]) -> Result<PublicKey, RsaError> {
         let exponent = check_key(modulus, exponent)?;
         let bits = bignum::bit_length(modulus);
@@ -165,9 +167,9 @@ impl fmt::Debug for PublicKey {
 }
 
 /// Checks that `modulus` and `exponent`, big-endian, are a key irongall
-/// verifies with: the modulus odd and within the bounds the module's
-/// documentation gives, the exponent odd, at least 3, and within its bound.
-/// Returns the exponent.
+/// verifies with: the modulus within the bounds the module's documentation
+/// gives and odd, then the exponent within its bound, odd, and at least 3.
+/// Returns the exponent, or the error of the first check it fails.
 ///
 /// [`PublicKey::new`] refuses any other key, and the policy accepts no other
 /// key, through this one check.
@@ -183,12 +185,14 @@ pub(crate) fn check_key(modulus: &[u8], exponent: &[u8]) -> Result<u64, RsaError
     if modulus.last().is_none_or(|&low| low & 1 == 0) {
         return Err(RsaError::InvalidKey);
     }
+    // An exponent past the bound is too large whatever else it is, as one
+    // too wide for 64 bits must be, since its parity is not read.
     let exponent = bignum::to_u64(exponent).ok_or(RsaError::ExponentTooLarge)?;
-    if exponent < 3 || exponent & 1 == 0 {
-        return Err(RsaError::InvalidKey);
-    }
     if exponent > MAXIMUM_EXPONENT {
         return Err(RsaError::ExponentTooLarge);
+    }
+    if exponent < 3 || exponent & 1 == 0 {
+        return Err(RsaError::InvalidKey);
     }
     Ok(exponent)
 }

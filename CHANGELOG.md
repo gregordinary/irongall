@@ -76,6 +76,11 @@ public API changes, since a verifier's verdicts are part of its contract.
   a minute for each megabyte of its signatures, under an 8192-bit key with
   the largest exponent irongall accepts. Earlier releases said only that
   it takes more.
+- An even RSA exponent larger than 2^33 - 1 is refused as
+  `RsaError::ExponentTooLarge`, and by `Signature::verify` as
+  `VerifyError::ExponentTooLarge`, as every exponent that large is.
+  Earlier releases refused one that fits in 64 bits as `InvalidKey`.
+  `rsa::PublicKey::new` states the order of its checks.
 
 ## [0.1.1] - 2026-11-01
 

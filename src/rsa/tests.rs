@@ -277,6 +277,14 @@ fn key_bounds() {
             &[0x01, 0, 0, 0, 0, 0, 0, 0, 0x01],
             RsaError::ExponentTooLarge,
         ),
+        // An even exponent past the bound is too large, whether or not it
+        // fits in 64 bits.
+        (&[0x02, 0x00, 0x00, 0x00, 0x00], RsaError::ExponentTooLarge),
+        (&[0x01, 0, 0, 0, 0, 0], RsaError::ExponentTooLarge),
+        (
+            &[0x01, 0, 0, 0, 0, 0, 0, 0, 0x00],
+            RsaError::ExponentTooLarge,
+        ),
     ] {
         assert_eq!(
             verify(&modulus, exponent, &digest, &signature),

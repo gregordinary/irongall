@@ -50,6 +50,11 @@ public API changes, since a verifier's verdicts are part of its contract.
 ### Changed
 
 - SECURITY.md states which releases receive security fixes.
+- A signature is refused as malformed when it carries a subpacket of a type
+  irongall keeps without reading whose length is not the one RFC 9580 gives
+  the type (§5.2.5): Exportable Certification, Revocable, Trust Signature,
+  Revocation Key, Notation Data, Signature Target, Intended Recipient
+  Fingerprint, or Preferred AEAD Ciphersuites. Earlier releases read it.
 
 ## [0.1.1] - 2026-11-01
 

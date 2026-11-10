@@ -4,6 +4,7 @@
 use alloc::vec::Vec;
 
 use super::{Signature, Unhonored};
+use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyId};
 use crate::packet::{Fields, PacketError, PacketErrorKind, Version};
 use crate::wire::wire_number;
@@ -243,6 +244,51 @@ const fn honors_critical(subpacket_type: SubpacketType, embedded: bool) -> bool 
     }
 }
 
+/// Whether a subpacket of `subpacket_type`, a type irongall keeps without
+/// decoding, is of the length RFC 9580 gives the type, where it gives one:
+/// a fixed length, or one the subpacket's own fields set. RFC 9580 §5.2.5
+/// counts a subpacket of another length among the malformed signatures a
+/// verifier ignores. A type of no fixed length is of any.
+fn of_expected_length(subpacket_type: SubpacketType, body: &[u8]) -> bool {
+    match subpacket_type {
+        // A Boolean (§5.2.3.19, §5.2.3.20).
+        SubpacketType::EXPORTABLE_CERTIFICATION | SubpacketType::REVOCABLE => body.len() == 1,
+        // A depth and an amount (§5.2.3.21).
+        SubpacketType::TRUST_SIGNATURE => body.len() == 2,
+        // A class, an algorithm, and a version 4 fingerprint (§5.2.3.23).
+        SubpacketType::REVOCATION_KEY => body.len() == 22,
+        // Flags, the lengths of a name and a value, then the name and the
+        // value (§5.2.3.24).
+        SubpacketType::NOTATION_DATA => match body {
+            [_, _, _, _, name_0, name_1, value_0, value_1, rest @ ..] => {
+                let name = usize::from(u16::from_be_bytes([*name_0, *name_1]));
+                let value = usize::from(u16::from_be_bytes([*value_0, *value_1]));
+                name.checked_add(value) == Some(rest.len())
+            }
+            _ => false,
+        },
+        // Two algorithms, then a digest of the hash algorithm's length, if
+        // RFC 9580 assigns the algorithm (§5.2.3.33).
+        SubpacketType::SIGNATURE_TARGET => match body {
+            [_, hash, digest @ ..] => HashAlgorithm(*hash)
+                .digest_length()
+                .is_none_or(|length| digest.len() == length),
+            _ => false,
+        },
+        // A key version, then a fingerprint of that version's length, for
+        // the versions RFC 9580 gives one (§5.2.3.36).
+        SubpacketType::INTENDED_RECIPIENT_FINGERPRINT => match body {
+            [4, fingerprint @ ..] => fingerprint.len() == 20,
+            [6, fingerprint @ ..] => fingerprint.len() == 32,
+            [_, ..] => true,
+            [] => false,
+        },
+        // Pairs of algorithms (§5.2.3.15).
+        SubpacketType::PREFERRED_AEAD_CIPHERSUITES => body.len().is_multiple_of(2),
+        _ => true,
+    }
+}
+
 /// Where a subpacket area is, which decides what its subpackets may do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Area {
@@ -255,15 +301,16 @@ pub(super) enum Area {
 /// Reads a subpacket area (RFC 9580 §5.2.3.7) to its end.
 ///
 /// A subpacket of a type irongall decodes is checked to be well formed in
-/// either area. In the hashed area, a subpacket marked critical must be one
-/// irongall honors; the bit carries no weight in the unhashed area, which
-/// anyone can change. An embedded signature is read as a signature, under
-/// the same `unhonored`, and appended to `embedded_signatures`, unless the
-/// area is itself an embedded signature's (`embedded`): one level only, so
-/// reading never recurses past it. Where `unhonored` says to overlook what
-/// irongall cannot honor, a malformed subpacket is kept as it is, one marked
-/// critical is kept, and an embedded signature that does not read is left
-/// out.
+/// either area, and one of a type it keeps without decoding to be of the
+/// length RFC 9580 gives the type, where it gives one. In the hashed area, a
+/// subpacket marked critical must be one irongall honors; the bit carries no
+/// weight in the unhashed area, which anyone can change. An embedded
+/// signature is read as a signature, under the same `unhonored`, and appended
+/// to `embedded_signatures`, unless the area is itself an embedded
+/// signature's (`embedded`): one level only, so reading never recurses past
+/// it. Where `unhonored` says to overlook what irongall cannot honor, a
+/// malformed subpacket is kept as it is, one marked critical is kept, and an
+/// embedded signature that does not read is left out.
 pub(super) fn read_area(
     mut area: Fields<'_>,
     which: Area,
@@ -304,7 +351,7 @@ pub(super) fn read_area(
             SubpacketType::ISSUER_FINGERPRINT => fingerprint(body, version).is_some(),
             SubpacketType::PRIMARY_USER_ID => primary_user_id(body).is_some(),
             SubpacketType::REASON_FOR_REVOCATION => revocation_reason(body).is_some(),
-            _ => true,
+            other => of_expected_length(other, body),
         };
         let refuse = unhonored == Unhonored::Refuse;
         if !well_formed && refuse {

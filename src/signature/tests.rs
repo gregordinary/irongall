@@ -327,13 +327,126 @@ fn typed_subpackets_read_the_last_in_the_hashed_area() {
 fn well_formed(number: u8) -> Vec<u8> {
     match number {
         2 | 3 | 9 => vec![0, 0, 0, 1],
+        5 => vec![1, 120],
+        12 => [&[0x80, 0x01][..], &[0x33; 20]].concat(),
         16 => vec![0x22; 8],
+        20 => [&[0x80, 0, 0, 0, 0, 1, 0, 1][..], b"nv"].concat(),
         25 => vec![0x01],
         29 => vec![0x00],
+        31 => [&[0x01, 0x08][..], &[0x44; 32]].concat(),
         32 => v4(&created(), &[]),
         33 => [&[0x04][..], &[0x33; 20]].concat(),
+        35 => [&[0x04][..], &[0x55; 20]].concat(),
+        39 => vec![0x09, 0x02],
         _ => vec![0x00],
     }
+}
+
+/// A subpacket of a type irongall keeps without decoding is held to the
+/// length RFC 9580 gives the type, where it gives one, in either area
+/// (§5.2.5), and to nothing else. Read only to weigh what it restricts, the
+/// signature reads regardless.
+#[test]
+fn undecoded_subpackets_are_held_to_their_length() {
+    let notation = |name: &[u8], value: &[u8], said: (u16, u16)| {
+        [
+            &[0x80, 0, 0, 0][..],
+            &said.0.to_be_bytes(),
+            &said.1.to_be_bytes(),
+            name,
+            value,
+        ]
+        .concat()
+    };
+    // Each type with bodies of its length, and of others.
+    type Bodies<'a> = &'a [&'a [u8]];
+    let cases: [(u8, Bodies<'_>, Bodies<'_>); 9] = [
+        (4, &[&[0x00], &[0x01], &[0x07]], &[&[], &[0x01, 0x00]]),
+        (7, &[&[0x01]], &[&[], &[0x01, 0x01]]),
+        (5, &[&[0x01, 0x78]], &[&[0x01], &[0x01, 0x78, 0x00]]),
+        (
+            12,
+            &[&well_formed(12), &[&[0x00, 0x01][..], &[0x33; 20]].concat()],
+            &[
+                &well_formed(12)[..21],
+                &[&well_formed(12)[..], &[0]].concat(),
+            ],
+        ),
+        (
+            20,
+            // Lengths that add up, whatever the name holds.
+            &[
+                &notation(b"n", b"v", (1, 1)),
+                &notation(&[0xFF], b"", (1, 0)),
+            ],
+            &[
+                &notation(b"n", b"v", (1, 2)),
+                &notation(b"n", b"v", (2, 1)),
+                &notation(b"n", b"vv", (1, 1)),
+                &notation(b"n", b"v", (0xFFFF, 0xFFFF)),
+                &[0x80, 0, 0, 0, 0, 0, 0],
+            ],
+        ),
+        (
+            31,
+            // A hash RFC 9580 does not assign is of any length.
+            &[&well_formed(31), &[0x01, 100, 0x44]],
+            &[
+                &well_formed(31)[..33],
+                &[&well_formed(31)[..], &[0x44]].concat(),
+                &[0x01],
+                &[0x01, 0x02],
+                &[0x01, 0x02, 0x44],
+            ],
+        ),
+        (
+            35,
+            // A key version RFC 9580 does not define is of any length.
+            &[
+                &well_formed(35),
+                &[&[0x06][..], &[0x55; 32]].concat(),
+                &[0x05, 0x55],
+            ],
+            &[
+                &[],
+                &well_formed(35)[..20],
+                &[&well_formed(35)[..], &[0x55]].concat(),
+                &[&[0x06][..], &[0x55; 20]].concat(),
+            ],
+        ),
+        (
+            39,
+            &[&[], &[0x09, 0x02, 0x07, 0x01]],
+            &[&[0x09], &[0x09, 0x02, 0x07]],
+        ),
+        // A type of no fixed length is of any.
+        (11, &[&[], &[0x09], &[0x09, 0x08, 0x07]], &[]),
+    ];
+    let mut checked = 0;
+    for (number, good, bad) in cases {
+        for body in good {
+            let hashed = [created(), subpacket(number, body)].concat();
+            assert!(parse(&v4(&hashed, &[])).is_ok(), "{number} {body:02X?}");
+            assert!(parse(&v4(&created(), &subpacket(number, body))).is_ok());
+            checked += 1;
+        }
+        for body in bad {
+            let hashed = [created(), subpacket(number, body)].concat();
+            for (signature, at) in [
+                (v4(&hashed, &[]), 18),
+                (v4(&created(), &subpacket(number, body)), 20),
+            ] {
+                assert_eq!(
+                    failure(&signature),
+                    (PacketErrorKind::InvalidSubpacket, at),
+                    "{number} {body:02X?}"
+                );
+                assert!(parse_with(&signature, Signature::from_packet_unhonored).is_ok());
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 43);
 }
 
 #[test]

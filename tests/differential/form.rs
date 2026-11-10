@@ -310,8 +310,10 @@ fn subpackets(
     Some(types)
 }
 
-/// Whether a subpacket of a type irongall decodes has the form RFC 9580
-/// gives it; every other type passes.
+/// Whether a subpacket has the form irongall holds it to: a type irongall
+/// decodes, the form RFC 9580 gives it, and a type it keeps without
+/// decoding, the length RFC 9580 gives it, where it gives one (§5.2.5);
+/// every other type passes.
 fn decoded_form(kind: u8, body: &[u8], version: u8) -> bool {
     match kind {
         // Creation, expiration, and key expiration times (§5.2.3.11,
@@ -329,42 +331,23 @@ fn decoded_form(kind: u8, body: &[u8], version: u8) -> bool {
         25 => matches!(body, [0] | [1]),
         // A reason for revocation (§5.2.3.31): a code, then a message.
         29 => !body.is_empty(),
-        _ => true,
-    }
-}
-
-/// Whether a subpacket of a type irongall keeps as it is, without decoding
-/// it, has the form RFC 9580 gives it; every other type passes.
-fn undecoded_form(kind: u8, body: &[u8]) -> bool {
-    let text = |octets: &[u8]| std::str::from_utf8(octets).is_ok();
-    match kind {
         // Exportable Certification and Revocable (§5.2.3.19, §5.2.3.20): a
         // Boolean.
         4 | 7 => body.len() == 1,
         // Trust Signature (§5.2.3.21): a level and an amount.
         5 => body.len() == 2,
-        // Regular Expression (§5.2.3.22): text ending with a zero octet.
-        6 => body
-            .split_last()
-            .is_some_and(|(&last, text_part)| last == 0 && text(text_part)),
         // Revocation Key (§5.2.3.23): a class, an algorithm, a fingerprint.
-        // The class sets 0x80, and perhaps 0x40; its other bits are kept for
-        // a future expansion that gives them a form.
-        12 => body.len() == 22 && matches!(body[0], 0x80 | 0xC0),
-        // Notation Data (§5.2.3.24): flags, of which only the first bit is
-        // defined and the rest must be zero, the two lengths, the name and
-        // the value, the name text.
+        12 => body.len() == 22,
+        // Notation Data (§5.2.3.24): flags, the two lengths, then the name
+        // and the value, of those lengths.
         20 => match body {
-            [flags, 0, 0, 0, a, b, c, d, rest @ ..] if flags & 0x7F == 0 => {
+            [_, _, _, _, a, b, c, d, rest @ ..] => {
                 let name = usize::from(u16::from_be_bytes([*a, *b]));
                 let value = usize::from(u16::from_be_bytes([*c, *d]));
-                rest.len() == name + value && text(&rest[..name])
+                rest.len() == name + value
             }
             _ => false,
         },
-        // Preferred Key Server, Policy URI, Signer's User ID (§5.2.3.26,
-        // §5.2.3.28, §5.2.3.30): text.
-        24 | 26 | 28 => text(body),
         // Signature Target (§5.2.3.33): algorithms, and a hash of the
         // hash algorithm's size.
         31 => match body {
@@ -372,14 +355,50 @@ fn undecoded_form(kind: u8, body: &[u8]) -> bool {
             _ => false,
         },
         // Intended Recipient Fingerprint (§5.2.3.36): a key version, and a
-        // fingerprint of that version.
+        // fingerprint of that version's size, where RFC 9580 gives one.
         35 => match body.split_first() {
             Some((4, fingerprint)) => fingerprint.len() == 20,
             Some((6, fingerprint)) => fingerprint.len() == 32,
-            _ => false,
+            Some(_) => true,
+            None => false,
         },
         // Preferred AEAD Ciphersuites (§5.2.3.15): pairs of algorithms.
         39 => body.len().is_multiple_of(2),
+        _ => true,
+    }
+}
+
+/// Whether a subpacket of a type irongall keeps as it is, without decoding
+/// it, has the form RFC 9580 gives it in what irongall does not check, its
+/// length aside (see [`decoded_form`]); every other type passes.
+fn undecoded_form(kind: u8, body: &[u8]) -> bool {
+    let text = |octets: &[u8]| std::str::from_utf8(octets).is_ok();
+    match kind {
+        // Regular Expression (§5.2.3.22): text ending with a zero octet.
+        6 => body
+            .split_last()
+            .is_some_and(|(&last, text_part)| last == 0 && text(text_part)),
+        // Revocation Key (§5.2.3.23): the class sets 0x80, and perhaps 0x40;
+        // its other bits are kept for a future expansion that gives them a
+        // form.
+        12 => body
+            .first()
+            .is_none_or(|class| matches!(class, 0x80 | 0xC0)),
+        // Notation Data (§5.2.3.24): flags, of which only the first bit is
+        // defined and the rest must be zero, and a name that is text.
+        20 => match body {
+            [flags, 0, 0, 0, a, b, _, _, rest @ ..] if flags & 0x7F == 0 => {
+                let name = usize::from(u16::from_be_bytes([*a, *b]));
+                rest.get(..name).is_none_or(text)
+            }
+            _ => body.len() < 8,
+        },
+        // Preferred Key Server, Policy URI, Signer's User ID (§5.2.3.26,
+        // §5.2.3.28, §5.2.3.30): text.
+        24 | 26 | 28 => text(body),
+        // Intended Recipient Fingerprint (§5.2.3.36): a key version RFC
+        // 9580 defines.
+        35 => matches!(body.first(), None | Some(4 | 6)),
         _ => true,
     }
 }

@@ -742,8 +742,9 @@ pub(crate) enum Divergence {
     /// area, which RFC 9580 §5.2.3.11 requires. rPGP reads it.
     NoCreationTime,
     /// A subpacket of a type irongall decodes is not of the type's form, such
-    /// as a Primary User ID whose Boolean is neither 0 nor 1. irongall
-    /// refuses its signature; rPGP reads what it can.
+    /// as a Primary User ID whose Boolean is neither 0 nor 1, or one of a
+    /// type it keeps without decoding is not of the length RFC 9580 gives
+    /// the type. irongall refuses its signature; rPGP reads what it can.
     MalformedSubpacket,
     /// A hashed subpacket is marked critical, and is of a type irongall does
     /// not honor (RFC 9580 §5.2.3.7). irongall refuses its signature; rPGP
@@ -773,9 +774,9 @@ pub(crate) enum Divergence {
     /// a type it does not know.
     ReservedType,
     /// A subpacket of a type irongall keeps as it is, without decoding it,
-    /// is not of the type's form: a notation whose lengths do not add up, or
-    /// text that is not UTF-8. rPGP decodes the type, and refuses the
-    /// signature.
+    /// is of the type's length but not of its form: a Revocation Key whose
+    /// class lacks the bit every class sets, or text that is not UTF-8.
+    /// rPGP decodes the type, and refuses the signature.
     UndecodedSubpacket,
     /// A signature embedded in another embeds one in turn. irongall reads
     /// one level of embedding and keeps a deeper one as it is; rPGP refuses

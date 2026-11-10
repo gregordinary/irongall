@@ -46,7 +46,13 @@
 //! implement, is refused, and RFC 9580 §5.2.5 requires that the packets around
 //! it be read regardless. Beyond the structure and lengths of the packet:
 //!
-//! - A subpacket of a type irongall decodes, of the wrong length.
+//! - A subpacket of a type irongall decodes that is not of the type's form,
+//!   and one of a type it keeps without decoding whose length is not the
+//!   one RFC 9580 gives the type (§5.2.5): Exportable Certification,
+//!   Revocable, Trust Signature, Revocation Key, Notation Data whose lengths
+//!   do not add up, Signature Target, Intended Recipient Fingerprint, and
+//!   Preferred AEAD Ciphersuites. The form of such a type is not otherwise
+//!   checked.
 //! - A signature without a creation time in its hashed area (RFC 9580
 //!   §5.2.3.11).
 //! - A version 6 salt of a size other than its hash algorithm's (RFC 9580

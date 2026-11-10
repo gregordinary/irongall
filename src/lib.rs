@@ -64,13 +64,17 @@
 //! - **Critical subpackets** refuse their signature unless irongall
 //!   implements them or their meaning cannot change a verification
 //!   (§5.2.3.7). The [`signature`] module lists them.
-//! - **Malformed subpackets** of the types irongall reads refuse their
-//!   signature, among them a Primary User ID whose Boolean is neither 0
-//!   nor 1. A certificate's signature refused for one, or for a critical
-//!   subpacket, grants nothing, as §5.2.5 requires, and still restricts what
-//!   the certificate grants, as the [`policy`] module sets out. Were it
-//!   passed over, anyone who handles a certificate could make a revocation
-//!   go unread by damaging a subpacket in its unhashed area, which no
+//! - **Malformed subpackets** refuse their signature: one of a type irongall
+//!   reads that is not of the type's form, among them a Primary User ID
+//!   whose Boolean is neither 0 nor 1, and one of a type it keeps without
+//!   reading whose length is not the one RFC 9580 gives the type, which
+//!   §5.2.5 counts as malformed. The form of such a type is not otherwise
+//!   checked: a notation's name need not be UTF-8, for one. A certificate's
+//!   signature refused for a malformed subpacket, or for a critical one,
+//!   grants nothing, as §5.2.5 requires, and still restricts what the
+//!   certificate grants, as the [`policy`] module sets out. Were it passed
+//!   over, anyone who handles a certificate could make a revocation go
+//!   unread by damaging a subpacket in its unhashed area, which no
 //!   signature covers.
 //! - **What no signature covers** does not decide whether a certificate's
 //!   statement restricts: its hash prefix, octets after its material, and
@@ -81,6 +85,11 @@
 //!   subpacket does. §5.2.3.6 and §3.2 require such a version 6 signature to
 //!   be rejected: irongall rejects it as a signature over a document, and
 //!   weighs it as a certificate's statement only where it restricts.
+//! - **Issuers** say only which keys to try, so a signature is not refused
+//!   for naming its issuer as RFC 9580 forbids its maker to: with an Issuer
+//!   Key ID other than the low 64 bits of a version 4 Issuer Fingerprint
+//!   beside it (§5.2.3.35), or with an Issuer Key ID in a version 6
+//!   signature (§5.2.3.12).
 //! - **`Hash` armor headers** must be well formed, and their names are not
 //!   checked against the signatures, as §6.2.2.3 requires. GnuPG checks
 //!   them.

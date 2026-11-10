@@ -354,6 +354,12 @@ fn dated() -> Vec<u8> {
     subpacket(2, &make::CREATED.to_be_bytes())
 }
 
+/// A Revocation Key (RFC 9580 §5.2.3.23) of the class `class`: Ed25519, and
+/// a version 4 fingerprint.
+fn revocation_key(class: u8) -> Vec<u8> {
+    [&[class, 27][..], &[0x33; 20]].concat()
+}
+
 /// A notation (RFC 9580 §5.2.3.24): a flag that it is text, its name and its
 /// value.
 fn notation() -> Vec<u8> {
@@ -518,8 +524,8 @@ fn each_reading_divergence() {
         (Divergence::ReservedType, reserved, typed),
         (
             Divergence::UndecodedSubpacket,
-            signature(&dated(), &subpacket(20, &notation()[1..]), &native),
-            signature(&dated(), &subpacket(20, &notation()), &native),
+            signature(&dated(), &subpacket(12, &revocation_key(0x00)), &native),
+            signature(&dated(), &subpacket(12, &revocation_key(0x80)), &native),
         ),
         (
             Divergence::NestedEmbeddedSignature,

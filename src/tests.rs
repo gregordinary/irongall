@@ -14,10 +14,10 @@ use crate::signature::{Signature, Subpacket};
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn the_structures_input_is_held_in_keep_their_sizes() {
-    assert!(size_of::<Certificate>() <= 280);
-    assert!(size_of::<UserId>() <= 72);
-    assert!(size_of::<Subkey>() <= 160);
-    assert!(size_of::<Signature>() <= 224);
-    assert!(size_of::<Subpacket>() <= 32);
-    assert!(size_of::<Header>() <= 48);
+    assert!(size_of::<Certificate>() <= 200);
+    assert!(size_of::<UserId>() <= 40);
+    assert!(size_of::<Subkey>() <= 128);
+    assert!(size_of::<Signature>() <= 184);
+    assert!(size_of::<Subpacket>() <= 24);
+    assert!(size_of::<Header>() <= 32);
 }

@@ -83,6 +83,7 @@ mod verify;
 #[cfg(test)]
 mod tests;
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 pub use subpacket::{KeyFlags, RevocationCode, RevocationReason, Subpacket, SubpacketType};
@@ -165,24 +166,39 @@ pub struct Signature {
     signature_type: SignatureType,
     public_key_algorithm: PublicKeyAlgorithm,
     hash_algorithm: HashAlgorithm,
-    hashed: Vec<Subpacket>,
-    unhashed: Vec<Subpacket>,
+    hashed: Box<[Subpacket]>,
+    unhashed: Box<[Subpacket]>,
     hash_prefix: [u8; 2],
-    salt: Vec<u8>,
+    salt: Box<[u8]>,
     material: SignatureMaterial,
     creation_time: u32,
     /// The signatures embedded in either area, hashed area first.
-    embedded: Vec<Signature>,
+    embedded: Box<[Signature]>,
     /// How many of `embedded`, from the first, are in the hashed area.
     embedded_hashed: usize,
     /// The body from the version through the hashed subpackets: the part of
     /// the signature its own hash covers (RFC 9580 §5.2.4).
-    hashed_fields: Vec<u8>,
+    hashed_fields: Box<[u8]>,
     /// The length of the body, from the version through the material.
     length: usize,
+    /// How the signature was read: whether what irongall cannot honor
+    /// refused it or was overlooked.
+    unhonored: Unhonored,
 }
 
 impl Signature {
+    /// The fewest octets a signature's body can hold and read: version 4,
+    /// with a creation time alone in its hashed area, an empty unhashed
+    /// area, and material of no length, which an algorithm irongall does not
+    /// read may have. Version, type, algorithms, and the hashed area's
+    /// length take six octets, the creation time six, the unhashed area's
+    /// length two, and the hash prefix two.
+    ///
+    /// Reading allocates for a signature only where this many octets could
+    /// hold one, so what it allocates for signatures that turn out not to
+    /// read is bounded by the input's length.
+    pub(crate) const SHORTEST: usize = 16;
+
     /// Reads a Signature packet.
     ///
     /// # Errors
@@ -262,7 +278,7 @@ impl Signature {
         let hashed_fields = from_version
             .clone()
             .take(fields.offset().saturating_sub(at))?
-            .to_vec();
+            .into();
         let embedded_hashed = embedded_signatures.len();
         let unhashed = match subpacket::read_area(
             area(&mut fields, version)?,
@@ -275,21 +291,21 @@ impl Signature {
             Ok(unhashed) => unhashed,
             Err(_) if unhonored == Unhonored::Overlook => {
                 embedded_signatures.truncate(embedded_hashed);
-                Vec::new()
+                Box::default()
             }
             Err(error) => return Err(error),
         };
 
         let hash_prefix = fields.array()?;
         let salt = match version {
-            Version::V4 => Vec::new(),
+            Version::V4 => Box::default(),
             Version::V6 => {
                 let size_at = fields.offset();
                 let size = fields.u8()?;
                 if hash_algorithm.v6_salt_size() != Some(size) {
                     return Err(fields.error_at(PacketErrorKind::SaltSize, size_at));
                 }
-                fields.take(usize::from(size))?.to_vec()
+                fields.take(usize::from(size))?.into()
             }
         };
         let material = read_material(&mut fields, public_key_algorithm, version, unhonored)?;
@@ -312,10 +328,11 @@ impl Signature {
             salt,
             material,
             creation_time,
-            embedded: embedded_signatures,
+            embedded: embedded_signatures.into_boxed_slice(),
             embedded_hashed,
             hashed_fields,
             length,
+            unhonored,
         })
     }
 
@@ -458,6 +475,13 @@ impl Signature {
     /// through the hashed subpackets (RFC 9580 §5.2.4).
     pub(crate) fn hashed_fields(&self) -> &[u8] {
         &self.hashed_fields
+    }
+
+    /// Whether the signature read as [`from_packet`](Self::from_packet)
+    /// reads it, rather than only with what irongall cannot honor overlooked
+    /// ([`from_packet_unhonored`](Self::from_packet_unhonored)).
+    pub(crate) fn is_honored(&self) -> bool {
+        self.unhonored == Unhonored::Refuse
     }
 
     /// The length of the signature's body, in octets: of its packet's body,

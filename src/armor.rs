@@ -52,7 +52,7 @@
 //! unencoded ahead of an armored signature block, are read by
 //! [`document::cleartext`](crate::document::cleartext) with the same rules.
 
-use alloc::string::String;
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -104,8 +104,8 @@ impl fmt::Display for Label {
 /// An armor header: a `Key: Value` line between the header line and the data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
-    key: String,
-    value: String,
+    key: Box<str>,
+    value: Box<str>,
 }
 
 impl Header {
@@ -119,12 +119,23 @@ impl Header {
         &self.value
     }
 
-    /// Reads a header from a line whose trailing whitespace is already gone.
+    /// Reads a header from a line whose trailing whitespace is already gone:
+    /// see [`split`](Self::split).
+    fn parse(line: &[u8]) -> Option<Header> {
+        let (key, value) = Header::split(line)?;
+        Some(Header {
+            key: Box::from(key),
+            value: Box::from(value),
+        })
+    }
+
+    /// The key and the value of a header line whose trailing whitespace is
+    /// already gone, or `None` if the line is not a header.
     ///
     /// The key is one or more printable ASCII characters other than a colon.
     /// A colon and a space separate it from the value, which is UTF-8; an
     /// empty value may drop the space.
-    fn parse(line: &[u8]) -> Option<Header> {
+    fn split(line: &[u8]) -> Option<(&str, &str)> {
         let mut parts = line.splitn(2, |&byte| byte == b':');
         let key = parts.next()?;
         let rest = parts.next()?;
@@ -136,15 +147,15 @@ impl Header {
         if key.is_empty() || !key.iter().all(u8::is_ascii_graphic) {
             return None;
         }
-        Some(Header {
-            key: String::from(core::str::from_utf8(key).ok()?),
-            value: String::from(core::str::from_utf8(value).ok()?),
-        })
+        Some((
+            core::str::from_utf8(key).ok()?,
+            core::str::from_utf8(value).ok()?,
+        ))
     }
 
     /// Whether the header is a `Hash` header.
     fn is_hash(&self) -> bool {
-        self.key == "Hash"
+        &*self.key == "Hash"
     }
 
     /// Whether a `Hash` header's value is what RFC 9580 §6.2.2.3 allows: a
@@ -162,8 +173,8 @@ impl Header {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Armor {
     label: Label,
-    headers: Vec<Header>,
-    data: Vec<u8>,
+    headers: Box<[Header]>,
+    data: Box<[u8]>,
 }
 
 impl Armor {
@@ -189,7 +200,7 @@ impl Armor {
 
     /// The decoded data, taken from the block.
     pub fn into_data(self) -> Vec<u8> {
-        self.data
+        self.data.into_vec()
     }
 }
 
@@ -486,6 +497,7 @@ impl From<Base64Error> for ArmorErrorKind {
 }
 
 /// Reads armored blocks from an input, a line at a time.
+#[derive(Clone)]
 struct Reader<'a> {
     /// The input after the line read last.
     rest: &'a [u8],
@@ -521,6 +533,20 @@ impl<'a> Reader<'a> {
         self.rest = parts.next().unwrap_or_default();
         self.line = self.line.saturating_add(1);
         Some(line)
+    }
+
+    /// How many of the lines that follow are armor headers, up to the first
+    /// that is not one, read ahead without moving past them.
+    fn count_headers(&self) -> usize {
+        let mut ahead = self.clone();
+        let mut count: usize = 0;
+        while let Some(line) = ahead.next_line() {
+            if Header::split(line).is_none() {
+                break;
+            }
+            count = count.saturating_add(1);
+        }
+        count
     }
 
     /// An error on the line read last.
@@ -564,7 +590,8 @@ impl<'a> Reader<'a> {
 
     /// Reads the rest of a block whose header line was read last.
     fn read_block(&mut self, label: Label) -> Result<Armor, ArmorError> {
-        let mut headers = Vec::new();
+        // Counted first, so that the headers are allocated for once.
+        let mut headers = Vec::with_capacity(self.count_headers());
         // The data's first line, when it follows the header line directly.
         let mut first_data_line = None;
         loop {
@@ -620,8 +647,8 @@ impl<'a> Reader<'a> {
         let data = data.finish().map_err(|error| self.at_line(error.into()))?;
         Ok(Armor {
             label,
-            headers,
-            data,
+            headers: headers.into_boxed_slice(),
+            data: data.into_boxed_slice(),
         })
     }
 

@@ -37,6 +37,7 @@
 //! [`UnsupportedVersion`](PacketErrorKind::UnsupportedVersion): versions 3 and
 //! 5 take their fingerprints differently, so irongall cannot name them.
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -113,7 +114,7 @@ pub struct PublicKey {
     fingerprint: Fingerprint,
     /// The packet's body, which a signature over the key hashes (RFC 9580
     /// §5.2.4).
-    body: Vec<u8>,
+    body: Box<[u8]>,
 }
 
 impl PublicKey {
@@ -164,7 +165,7 @@ impl PublicKey {
             algorithm,
             material,
             fingerprint,
-            body: packet.body().to_vec(),
+            body: packet.body().into(),
         })
     }
 

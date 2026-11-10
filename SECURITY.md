@@ -40,14 +40,14 @@ advisory names the reporter unless you ask otherwise.
   to panic, to allocate nothing its input does not account for, and to do
   work and hold memory linear in its input. Each certificate, user ID,
   subkey, signature, subpacket, and armor header is held in a structure of
-  its own, larger than the smallest packet or line that encodes it, and a
-  list may keep room for more entries than it holds. So on a 64-bit target,
-  input packed with the smallest of them is held in many times its size: a
-  document's signatures in up to about 50 times their size, and a keyring
-  in up to about 130 times its size while its certificates are combined
-  into a `Keyring`. A panic, or memory or time that grows faster than the
-  input, is a vulnerability, since a verifier reads input from whoever
-  sends it.
+  its own, larger than the smallest packet or line that encodes it. So on a
+  64-bit target, input packed with the smallest of them is held in several
+  times its size: a document, binary or armored, in at most 16 times its
+  size, and a keyring in at most 28 times its size once its certificates
+  are a `Keyring`, and 56 times while they are combined into one, as the
+  list that gathers them grows. A panic, or memory or time that grows
+  faster than the input, is a vulnerability, since a verifier reads input
+  from whoever sends it.
 - **An undocumented departure.** irongall reading or judging an input
   differently from RFC 9580 where the Conformance section of the crate
   documentation does not list the difference.

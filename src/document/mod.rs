@@ -96,6 +96,7 @@
 #[cfg(test)]
 mod tests;
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -106,9 +107,9 @@ use crate::signature::{Signature, SignatureType};
 /// A cleartext signed message: a text and the signatures over it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cleartext {
-    text: Vec<u8>,
-    signatures: Vec<Signature>,
-    skipped: Vec<PacketError>,
+    text: Box<[u8]>,
+    signatures: Box<[Signature]>,
+    skipped: Box<[PacketError]>,
 }
 
 impl Cleartext {
@@ -149,9 +150,9 @@ pub fn cleartext(input: &[u8]) -> Result<Cleartext, DocumentError> {
     let (text, block) = armor::decode_cleartext(input)?;
     let (signatures, skipped) = signatures(block.data(), &[SignatureType::TEXT])?;
     Ok(Cleartext {
-        text,
-        signatures,
-        skipped,
+        text: text.into_boxed_slice(),
+        signatures: signatures.into_boxed_slice(),
+        skipped: skipped.into_boxed_slice(),
     })
 }
 
@@ -167,8 +168,8 @@ pub fn cleartext(input: &[u8]) -> Result<Cleartext, DocumentError> {
 /// [`Policy::with_text_signatures`]: crate::policy::Policy::with_text_signatures
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detached {
-    signatures: Vec<Signature>,
-    skipped: Vec<PacketError>,
+    signatures: Box<[Signature]>,
+    skipped: Box<[PacketError]>,
 }
 
 impl Detached {
@@ -205,8 +206,8 @@ pub fn detached(input: &[u8]) -> Result<Detached, DocumentError> {
         signatures(armor::decode(input)?.data(), DOCUMENT_TYPES)?
     };
     Ok(Detached {
-        signatures,
-        skipped,
+        signatures: signatures.into_boxed_slice(),
+        skipped: skipped.into_boxed_slice(),
     })
 }
 
@@ -217,12 +218,25 @@ const DOCUMENT_TYPES: &[SignatureType] = &[SignatureType::BINARY, SignatureType:
 /// Reads the signatures `data` holds, keeping those of `types` and passing
 /// over, with the reason, those of any other type and those that do not
 /// read.
+///
+/// The Signature packets are counted first, by their framing alone, so that
+/// each list is allocated once: the signatures for those packets that could
+/// hold one, and the reasons for every one, since any may be passed over.
 fn signatures(
     data: &[u8],
     types: &[SignatureType],
 ) -> Result<(Vec<Signature>, Vec<PacketError>), PacketError> {
-    let mut signatures = Vec::new();
-    let mut skipped = Vec::new();
+    let (mut packets, mut long_enough) = (0_usize, 0_usize);
+    for packet in packet::packets(data).map_while(Result::ok) {
+        if packet.tag() == Tag::SIGNATURE {
+            packets = packets.saturating_add(1);
+            if packet.body().len() >= Signature::SHORTEST {
+                long_enough = long_enough.saturating_add(1);
+            }
+        }
+    }
+    let mut signatures = Vec::with_capacity(long_enough);
+    let mut skipped = Vec::with_capacity(packets);
     for packet in packet::packets(data) {
         let packet = packet?;
         match packet.tag() {

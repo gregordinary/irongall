@@ -147,11 +147,14 @@ and a case in `divergences.rs` that produces it.
   octets hashed and the public-key operations performed
   (`test_support::work`), so a bound is held by a test rather than a
   timing. Memory is linear in the input as well, and SECURITY.md states
-  how many times its size input packed with the smallest certificates,
-  user IDs, subkeys, signatures, subpackets, and armor headers is held in.
-  Those factors rest on the size of the structure each is held in, which a
-  unit test holds; a change that grows one changes the factors SECURITY.md
-  states.
+  how many times its size a document and a keyring are held in. A list
+  whose members the input frames before they are read, such as a
+  document's signatures or a signature's subpackets, is counted before
+  anything is allocated for it; one gathered while reading, such as a
+  certificate's user IDs, is held at its length once complete. Those
+  factors rest on the size of the structure each thing is held in, which
+  a unit test holds; a change that grows one changes the factors
+  SECURITY.md states.
 - **No constant-time code, and no claim of it.** Everything a verification
   computes over is public: the key, the signature, and the signed data. That
   is what makes hand-written cryptography reasonable here, and it leaves

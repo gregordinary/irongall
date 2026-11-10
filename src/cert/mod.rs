@@ -127,11 +127,14 @@
 #[cfg(test)]
 mod tests;
 
-use alloc::collections::BTreeMap;
+use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 use core::iter::FusedIterator;
+use core::mem;
 
-use crate::key::{Fingerprint, PublicKey};
+use crate::key::PublicKey;
 use crate::packet::{self, Packet, PacketError, PacketErrorKind, Packets, Tag};
 use crate::signature::{Signature, SignatureType};
 
@@ -141,15 +144,15 @@ use crate::signature::{Signature, SignatureType};
 pub struct Certificate {
     primary: PublicKey,
     primary_signatures: Signatures,
-    user_ids: Vec<UserId>,
-    subkeys: Vec<Subkey>,
+    user_ids: Box<[UserId]>,
+    subkeys: Box<[Subkey]>,
     /// The certifications, subkey bindings, and subkey revocations that are
     /// not placed with a part of their kind: those after something passed
     /// over, and those where their type does not belong. Judging the
     /// certificate tries each over every part it may be over (see the
     /// [module documentation](self)).
     unplaced: Signatures,
-    skipped: Vec<PacketError>,
+    skipped: Box<[PacketError]>,
 }
 
 impl Certificate {
@@ -164,13 +167,13 @@ impl Certificate {
     /// wherever they appear but after a user ID (see the
     /// [module documentation](self)).
     pub fn primary_signatures(&self) -> &[Signature] {
-        &self.primary_signatures.honored
+        self.primary_signatures.honored()
     }
 
     /// The signatures over the primary key alone that irongall does not
     /// honor; see [`Signatures::unhonored`].
     pub(crate) fn unhonored_primary_signatures(&self) -> &[Signature] {
-        &self.primary_signatures.unhonored
+        self.primary_signatures.unhonored()
     }
 
     /// The user IDs, each once, in the order they first appear.
@@ -194,14 +197,14 @@ impl Certificate {
     /// with no part, those irongall honors first: see
     /// [`Certificate::unplaced`].
     pub(crate) fn unplaced_signatures(&self) -> (&[Signature], &[Signature]) {
-        (&self.unplaced.honored, &self.unplaced.unhonored)
+        (self.unplaced.honored(), self.unplaced.unhonored())
     }
 }
 
 /// A user ID and the signatures over it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserId {
-    value: Vec<u8>,
+    value: Box<[u8]>,
     signatures: Signatures,
 }
 
@@ -217,13 +220,13 @@ impl UserId {
     /// (0x30), each of which revokes a certification of the user ID or a
     /// direct-key signature over the primary key alone.
     pub fn signatures(&self) -> &[Signature] {
-        &self.signatures.honored
+        self.signatures.honored()
     }
 
     /// The signatures over the user ID that irongall does not honor; see
     /// [`Signatures::unhonored`].
     pub(crate) fn unhonored_signatures(&self) -> &[Signature] {
-        &self.signatures.unhonored
+        self.signatures.unhonored()
     }
 }
 
@@ -243,21 +246,59 @@ impl Subkey {
     /// The signatures over the subkey and the primary key, in the order they
     /// appear: subkey bindings (0x18), and subkey revocations (0x28).
     pub fn signatures(&self) -> &[Signature] {
-        &self.signatures.honored
+        self.signatures.honored()
     }
 
     /// The signatures over the subkey that irongall does not honor; see
     /// [`Signatures::unhonored`].
     pub(crate) fn unhonored_signatures(&self) -> &[Signature] {
-        &self.signatures.unhonored
+        self.signatures.unhonored()
     }
 }
 
-/// The signatures placed over one part of a certificate.
+/// The signatures placed over one part of a certificate, in one list: those
+/// irongall honors, then those it does not, each in the order they appear.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Signatures {
+    all: Box<[Signature]>,
+    /// How many of `all`, from the first, irongall honors.
+    honored: usize,
+}
+
+impl Signatures {
+    /// Holds `signatures`, given in the order they appear, those irongall
+    /// honors first.
+    fn of(signatures: Vec<Signature>) -> Signatures {
+        let honored = signatures
+            .iter()
+            .filter(|signature| signature.is_honored())
+            .count();
+        if honored == signatures.len() {
+            return Signatures {
+                all: signatures.into_boxed_slice(),
+                honored,
+            };
+        }
+        let (mut all, mut unhonored): (Vec<_>, Vec<_>) =
+            signatures.into_iter().partition(Signature::is_honored);
+        all.append(&mut unhonored);
+        Signatures {
+            all: all.into_boxed_slice(),
+            honored,
+        }
+    }
+
+    /// The signatures in the order they appear, those irongall honors
+    /// first; what [`Signatures::of`] takes again.
+    fn into_vec(self) -> Vec<Signature> {
+        self.all.into_vec()
+    }
+
     /// Those that read.
-    honored: Vec<Signature>,
+    fn honored(&self) -> &[Signature] {
+        self.all.get(..self.honored).unwrap_or(&self.all)
+    }
+
     /// Those that read only when what irongall cannot honor is overlooked
     /// ([`Signature::from_packet_unhonored`]): a hashed subpacket marked
     /// critical whose meaning irongall does not implement, a malformed
@@ -270,7 +311,9 @@ struct Signatures {
     /// still revokes, and a self-signature among them that verifies and would
     /// govern keeps an older one from governing in its place, since passing
     /// over either would leave in force what its maker withdrew.
-    unhonored: Vec<Signature>,
+    fn unhonored(&self) -> &[Signature] {
+        self.all.get(self.honored..).unwrap_or_default()
+    }
 }
 
 /// Reads `input` as a keyring: a sequence of certificates.
@@ -345,7 +388,7 @@ impl Iterator for Certificates<'_> {
                 Err(error) => return Some(Err(error)),
             }
         }
-        Some(Ok(assembly.certificate))
+        Some(Ok(assembly.finish()))
     }
 }
 
@@ -355,31 +398,85 @@ impl FusedIterator for Certificates<'_> {}
 /// the place of the first: see [`Keyring::new`](crate::keyring::Keyring::new).
 ///
 /// Two primary keys are the same if their packets' bodies are, as two
-/// subkeys are within a certificate.
-pub(crate) fn combine(certificates: impl IntoIterator<Item = Certificate>) -> Vec<Certificate> {
-    let mut combined: Vec<Assembly> = Vec::new();
-    let mut primaries: BTreeMap<Fingerprint, Vec<usize>> = BTreeMap::new();
-    for certificate in certificates {
-        let indexes = primaries
-            .entry(certificate.primary.fingerprint())
-            .or_default();
-        let held = indexes.iter().copied().find(|&index| {
-            combined
-                .get(index)
-                .is_some_and(|held| held.certificate.primary == certificate.primary)
-        });
-        match held.and_then(|index| combined.get_mut(index)) {
-            Some(held) => held.combine(certificate),
-            None => {
-                indexes.push(combined.len());
-                combined.push(Assembly::resume(certificate));
+/// subkeys are within a certificate. Those of one primary key are combined
+/// as though their packets had been read one after the other, so they are
+/// assembled as one certificate's packets are.
+pub(crate) fn combine(certificates: impl IntoIterator<Item = Certificate>) -> Box<[Certificate]> {
+    let mut certificates: Vec<Certificate> = certificates.into_iter().collect();
+    merge_repeats(
+        &mut certificates,
+        |certificate, other| key_order(&certificate.primary, &other.primary),
+        |certificates, same| {
+            let mut parts = Parts::default();
+            for &index in same {
+                if let Some(certificate) = certificates.get_mut(index) {
+                    parts.append(Parts::take(certificate));
+                }
+            }
+            if let Some(first) = same.first().and_then(|&index| certificates.get_mut(index)) {
+                parts.finish_into(first);
+            }
+        },
+    );
+    certificates.into_boxed_slice()
+}
+
+/// The order keys are sorted in to bring together those that are the same:
+/// by fingerprint, then by their packets' bodies, which are equal only for
+/// the same key.
+fn key_order(key: &PublicKey, other: &PublicKey) -> Ordering {
+    key.fingerprint()
+        .cmp(&other.fingerprint())
+        .then_with(|| key.body().cmp(other.body()))
+}
+
+/// Merges the items of `items` that `order` finds equal into the first of
+/// them to appear, and removes the others, keeping the order in which the
+/// items first appear.
+///
+/// `merge` is given `items` and the indexes of two or more equal ones, in
+/// the order they appear, and merges them into the first. The equal items
+/// are found by sorting their indexes, so nothing is copied to find them,
+/// and the work is the sort's.
+fn merge_repeats<T>(
+    items: &mut Vec<T>,
+    order: impl Fn(&T, &T) -> Ordering,
+    mut merge: impl FnMut(&mut [T], &[usize]),
+) {
+    if items.len() < 2 {
+        return;
+    }
+    let compare =
+        |items: &[T], index: usize, other: usize| match (items.get(index), items.get(other)) {
+            (Some(item), Some(other)) => order(item, other),
+            _ => Ordering::Equal,
+        };
+    // Equal items sort by index, so each run of them is in the order they
+    // appear.
+    let mut sorted: Vec<usize> = (0..items.len()).collect();
+    sorted.sort_unstable_by(|&index, &other| compare(items, index, other).then(index.cmp(&other)));
+    let mut merged = vec![false; items.len()];
+    let mut rest = sorted.as_slice();
+    while let Some(&first) = rest.first() {
+        let equal = rest
+            .iter()
+            .take_while(|&&index| compare(items, first, index) == Ordering::Equal)
+            .count();
+        let (same, after) = rest.split_at_checked(equal).unwrap_or((rest, &[]));
+        if let [_, later @ ..] = same
+            && !later.is_empty()
+        {
+            merge(items, same);
+            for &index in later {
+                if let Some(flag) = merged.get_mut(index) {
+                    *flag = true;
+                }
             }
         }
+        rest = after;
     }
-    combined
-        .into_iter()
-        .map(|assembly| assembly.certificate)
-        .collect()
+    let mut merged = merged.into_iter();
+    items.retain(|_| !merged.next().unwrap_or(false));
 }
 
 /// The longest user ID a certificate is read with, in octets; a longer one is
@@ -405,121 +502,175 @@ fn passed_over(tag: Tag) -> bool {
 enum Place {
     /// The primary key, before any user ID or subkey.
     Primary,
-    /// The user ID at this index: the last one read, or the one it repeats.
+    /// The user ID at this index, in the order the User ID packets appear.
     UserId(usize),
-    /// The subkey at this index: the last one read, or the one it repeats.
+    /// The subkey at this index, in the order the Public Subkey packets
+    /// appear.
     Subkey(usize),
     /// Something passed over: a user attribute, a user ID that is too long,
     /// or a subkey that does not read or is of the wrong version.
     PassedOver,
 }
 
-/// A certificate being assembled, packet by packet, or combined with another
-/// of the same primary key.
+/// Everything of a certificate but its primary key, as it is read: each
+/// User ID and Public Subkey packet where it appears, whether or not it
+/// repeats one before it, with the signatures placed after it, those
+/// irongall honors and those it does not together, in the order they
+/// appear. [`finish_into`](Self::finish_into) merges the repeats.
+#[derive(Debug, Default)]
+struct Parts {
+    primary_signatures: Vec<Signature>,
+    user_ids: Vec<(Box<[u8]>, Vec<Signature>)>,
+    subkeys: Vec<(PublicKey, Vec<Signature>)>,
+    unplaced: Vec<Signature>,
+    skipped: Vec<PacketError>,
+}
+
+impl Parts {
+    /// Takes the parts of `certificate`, leaving it its primary key alone.
+    fn take(certificate: &mut Certificate) -> Parts {
+        Parts {
+            primary_signatures: mem::take(&mut certificate.primary_signatures).into_vec(),
+            user_ids: mem::take(&mut certificate.user_ids)
+                .into_vec()
+                .into_iter()
+                .map(|user_id| (user_id.value, user_id.signatures.into_vec()))
+                .collect(),
+            subkeys: mem::take(&mut certificate.subkeys)
+                .into_vec()
+                .into_iter()
+                .map(|subkey| (subkey.key, subkey.signatures.into_vec()))
+                .collect(),
+            unplaced: mem::take(&mut certificate.unplaced).into_vec(),
+            skipped: mem::take(&mut certificate.skipped).into_vec(),
+        }
+    }
+
+    /// Adds `other`'s parts after these, as though its packets had been read
+    /// after theirs.
+    fn append(&mut self, mut other: Parts) {
+        self.primary_signatures
+            .append(&mut other.primary_signatures);
+        self.user_ids.append(&mut other.user_ids);
+        self.subkeys.append(&mut other.subkeys);
+        self.unplaced.append(&mut other.unplaced);
+        self.skipped.append(&mut other.skipped);
+    }
+
+    /// Gives `certificate` these parts, each user ID and subkey once: one
+    /// that repeats another before it is merged into it, its signatures
+    /// after the other's. Each list is held at its length.
+    fn finish_into(self, certificate: &mut Certificate) {
+        let Parts {
+            primary_signatures,
+            mut user_ids,
+            mut subkeys,
+            unplaced,
+            skipped,
+        } = self;
+        merge_repeats(
+            &mut user_ids,
+            |(value, _), (other, _)| value.cmp(other),
+            merge_signatures,
+        );
+        merge_repeats(
+            &mut subkeys,
+            |(key, _), (other, _)| key_order(key, other),
+            merge_signatures,
+        );
+        certificate.primary_signatures = Signatures::of(primary_signatures);
+        certificate.user_ids = user_ids
+            .into_iter()
+            .map(|(value, signatures)| UserId {
+                value,
+                signatures: Signatures::of(signatures),
+            })
+            .collect();
+        certificate.subkeys = subkeys
+            .into_iter()
+            .map(|(key, signatures)| Subkey {
+                key,
+                signatures: Signatures::of(signatures),
+            })
+            .collect();
+        certificate.unplaced = Signatures::of(unplaced);
+        certificate.skipped = skipped.into_boxed_slice();
+    }
+}
+
+/// Moves the signatures of the parts at `same`, the indexes of one part
+/// read more than once, to the first, in the order they appear.
+fn merge_signatures<P>(parts: &mut [(P, Vec<Signature>)], same: &[usize]) {
+    let mut signatures = Vec::new();
+    for &index in same {
+        if let Some((_, placed)) = parts.get_mut(index) {
+            signatures.append(placed);
+        }
+    }
+    if let Some((_, placed)) = same.first().and_then(|&index| parts.get_mut(index)) {
+        *placed = signatures;
+    }
+}
+
+/// A certificate being assembled, packet by packet.
 struct Assembly {
-    certificate: Certificate,
+    primary: PublicKey,
+    parts: Parts,
     place: Place,
-    /// Where each user ID is in the certificate, by its value.
-    user_ids: BTreeMap<Vec<u8>, usize>,
-    /// Where the subkeys of each fingerprint are in the certificate: one,
-    /// unless keys whose packets differ share a fingerprint.
-    subkeys: BTreeMap<Fingerprint, Vec<usize>>,
 }
 
 impl Assembly {
     fn new(primary: PublicKey) -> Assembly {
-        Assembly::resume(Certificate {
+        Assembly {
             primary,
-            primary_signatures: Signatures::default(),
-            user_ids: Vec::new(),
-            subkeys: Vec::new(),
-            unplaced: Signatures::default(),
-            skipped: Vec::new(),
-        })
-    }
-
-    /// Resumes assembling `certificate`, whose user IDs and subkeys are each
-    /// held once.
-    fn resume(certificate: Certificate) -> Assembly {
-        let Certificate {
-            primary,
-            primary_signatures,
-            user_ids,
-            subkeys,
-            unplaced,
-            skipped,
-        } = certificate;
-        let mut assembly = Assembly {
-            certificate: Certificate {
-                primary,
-                primary_signatures,
-                user_ids: Vec::with_capacity(user_ids.len()),
-                subkeys: Vec::with_capacity(subkeys.len()),
-                unplaced,
-                skipped,
-            },
+            parts: Parts::default(),
             place: Place::Primary,
-            user_ids: BTreeMap::new(),
-            subkeys: BTreeMap::new(),
+        }
+    }
+
+    /// The certificate, each of its user IDs and subkeys held once.
+    fn finish(self) -> Certificate {
+        let mut certificate = Certificate {
+            primary: self.primary,
+            primary_signatures: Signatures::default(),
+            user_ids: Box::default(),
+            subkeys: Box::default(),
+            unplaced: Signatures::default(),
+            skipped: Box::default(),
         };
-        assembly.take(user_ids, subkeys);
-        assembly.place = Place::Primary;
-        assembly
-    }
-
-    /// Combines `other`, a certificate of the same primary key, into the
-    /// certificate, as though their packets had been read one after the
-    /// other: its signatures over the primary key with the certificate's,
-    /// and those over each of its user IDs and subkeys with those over the
-    /// same user ID or subkey, which is added if the certificate lacks it.
-    fn combine(&mut self, other: Certificate) {
-        self.place = Place::Primary;
-        self.extend(other.primary_signatures);
-        self.take(other.user_ids, other.subkeys);
-        let unplaced = &mut self.certificate.unplaced;
-        unplaced.honored.extend(other.unplaced.honored);
-        unplaced.unhonored.extend(other.unplaced.unhonored);
-        self.certificate.skipped.extend(other.skipped);
-        self.place = Place::PassedOver;
-    }
-
-    /// Places `user_ids` and `subkeys`, with their signatures, as though
-    /// their packets had been read.
-    fn take(&mut self, user_ids: Vec<UserId>, subkeys: Vec<Subkey>) {
-        for user_id in user_ids {
-            self.user_id(user_id.value);
-            self.extend(user_id.signatures);
-        }
-        for subkey in subkeys {
-            self.subkey(subkey.key);
-            self.extend(subkey.signatures);
-        }
+        self.parts.finish_into(&mut certificate);
+        certificate
     }
 
     /// Places the next packet, or refuses the certificate for it.
     fn add(&mut self, packet: &Packet<'_>) -> Result<(), PacketError> {
-        let certificate = &mut self.certificate;
         match packet.tag() {
             Tag::SIGNATURE => self.add_signature(packet),
             Tag::USER_ID if packet.body().len() > MAXIMUM_USER_ID_LENGTH => {
-                certificate
+                self.parts
                     .skipped
                     .push(packet.error(PacketErrorKind::UserIdTooLong));
                 self.place = Place::PassedOver;
             }
-            Tag::USER_ID => self.user_id(packet.body().to_vec()),
+            Tag::USER_ID => {
+                self.place = Place::UserId(self.parts.user_ids.len());
+                self.parts.user_ids.push((packet.body().into(), Vec::new()));
+            }
             Tag::PUBLIC_SUBKEY => {
                 let key = PublicKey::from_packet(packet).and_then(|key| {
-                    if key.version() == certificate.primary.version() {
+                    if key.version() == self.primary.version() {
                         Ok(key)
                     } else {
                         Err(packet.error(PacketErrorKind::SubkeyVersion))
                     }
                 });
                 match key {
-                    Ok(key) => self.subkey(key),
+                    Ok(key) => {
+                        self.place = Place::Subkey(self.parts.subkeys.len());
+                        self.parts.subkeys.push((key, Vec::new()));
+                    }
                     Err(error) => {
-                        certificate.skipped.push(error);
+                        self.parts.skipped.push(error);
                         self.place = Place::PassedOver;
                     }
                 }
@@ -531,65 +682,21 @@ impl Assembly {
         Ok(())
     }
 
-    /// Places what follows with the user ID `value`: the one the certificate
-    /// holds already, or else a new one.
-    fn user_id(&mut self, value: Vec<u8>) {
-        let user_ids = &mut self.certificate.user_ids;
-        let index = *self.user_ids.entry(value).or_insert_with_key(|value| {
-            let index = user_ids.len();
-            user_ids.push(UserId {
-                value: value.clone(),
-                signatures: Signatures::default(),
-            });
-            index
-        });
-        self.place = Place::UserId(index);
-    }
-
-    /// Places what follows with the subkey `key`: the one the certificate
-    /// holds already, read from the same packet body, or else a new one.
-    fn subkey(&mut self, key: PublicKey) {
-        let subkeys = &mut self.certificate.subkeys;
-        let indexes = self.subkeys.entry(key.fingerprint()).or_default();
-        let held = indexes
-            .iter()
-            .copied()
-            .find(|&index| subkeys.get(index).is_some_and(|held| held.key == key));
-        let index = held.unwrap_or_else(|| {
-            let index = subkeys.len();
-            indexes.push(index);
-            subkeys.push(Subkey {
-                key,
-                signatures: Signatures::default(),
-            });
-            index
-        });
-        self.place = Place::Subkey(index);
-    }
-
     /// The signatures placed with `place`, or `None` for something passed
     /// over, whose signatures go with it.
-    fn signatures(&mut self, place: Place) -> Option<&mut Signatures> {
-        let certificate = &mut self.certificate;
+    fn signatures(&mut self, place: Place) -> Option<&mut Vec<Signature>> {
+        let parts = &mut self.parts;
         match place {
-            Place::Primary => Some(&mut certificate.primary_signatures),
-            Place::UserId(index) => certificate
+            Place::Primary => Some(&mut parts.primary_signatures),
+            Place::UserId(index) => parts
                 .user_ids
                 .get_mut(index)
-                .map(|user_id| &mut user_id.signatures),
-            Place::Subkey(index) => certificate
+                .map(|(_, signatures)| signatures),
+            Place::Subkey(index) => parts
                 .subkeys
                 .get_mut(index)
-                .map(|subkey| &mut subkey.signatures),
+                .map(|(_, signatures)| signatures),
             Place::PassedOver => None,
-        }
-    }
-
-    /// Adds `signatures` to those placed where the last packet put them.
-    fn extend(&mut self, signatures: Signatures) {
-        if let Some(placed) = self.signatures(self.place) {
-            placed.honored.extend(signatures.honored);
-            placed.unhonored.extend(signatures.unhonored);
         }
     }
 
@@ -601,7 +708,6 @@ impl Assembly {
     /// placed with a part of its kind is kept unplaced (see
     /// [`Certificate::unplaced`]).
     fn add_signature(&mut self, packet: &Packet<'_>) {
-        let certificate = &mut self.certificate;
         let (signature, refusal) = match Signature::from_packet(packet) {
             Ok(signature) => (signature, None),
             Err(error) => match Signature::from_packet_unhonored(packet) {
@@ -609,7 +715,7 @@ impl Assembly {
                 Err(_) => {
                     // The signatures of something passed over go with it.
                     if self.place != Place::PassedOver {
-                        certificate.skipped.push(error);
+                        self.parts.skipped.push(error);
                     }
                     return;
                 }
@@ -640,25 +746,24 @@ impl Assembly {
             // not recorded as passed over themselves, but a statement among
             // them is kept, since the policy places it by what it is over.
             (_, Place::PassedOver) => {
-                self.unplace(signature, honored);
+                self.unplace(signature);
                 return;
             }
             _ => None,
         };
         if let Some(error) = refusal {
-            self.certificate.skipped.push(error);
+            self.parts.skipped.push(error);
         }
         match place.and_then(|place| self.signatures(place)) {
-            Some(signatures) if honored => signatures.honored.push(signature),
-            Some(signatures) => signatures.unhonored.push(signature),
+            Some(signatures) => signatures.push(signature),
             None => {
                 // An unhonored signature's refusal is already recorded.
                 if honored {
-                    self.certificate
+                    self.parts
                         .skipped
                         .push(packet.error(PacketErrorKind::MisplacedSignature));
                 }
-                self.unplace(signature, honored);
+                self.unplace(signature);
             }
         }
     }
@@ -667,7 +772,7 @@ impl Assembly {
     /// user ID or a subkey: a certification, a subkey binding, or a subkey
     /// revocation. A certification revocation is never unplaced, since one
     /// that follows no user ID is placed with the primary key.
-    fn unplace(&mut self, signature: Signature, honored: bool) {
+    fn unplace(&mut self, signature: Signature) {
         if !matches!(
             signature.signature_type(),
             SignatureType::GENERIC_CERTIFICATION
@@ -679,11 +784,6 @@ impl Assembly {
         ) {
             return;
         }
-        let unplaced = &mut self.certificate.unplaced;
-        if honored {
-            unplaced.honored.push(signature);
-        } else {
-            unplaced.unhonored.push(signature);
-        }
+        self.parts.unplaced.push(signature);
     }
 }

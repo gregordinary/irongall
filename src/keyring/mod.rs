@@ -80,6 +80,7 @@
 #[cfg(test)]
 mod tests;
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -91,7 +92,7 @@ use crate::signature::{DocumentHash, Signature};
 /// The certificates a caller trusts to sign documents.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Keyring {
-    certificates: Vec<Certificate>,
+    certificates: Box<[Certificate]>,
 }
 
 impl Keyring {

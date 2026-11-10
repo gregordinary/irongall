@@ -50,6 +50,15 @@ public API changes, since a verifier's verdicts are part of its contract.
 ### Changed
 
 - SECURITY.md states which releases receive security fixes.
+- Reading holds less memory. A document's signatures, a signature's
+  subpackets and embedded signatures, and an armored block's headers are
+  counted by their framing before anything is allocated for them, and
+  every other list is held at its length once complete. A certificate's
+  repeated user IDs and subkeys are merged without copying them, and
+  `Keyring::new` combines certificates in place. On a 64-bit target, a
+  document is held in at most 16 times its size, and a keyring in at most
+  28 times once it is a `Keyring`, where earlier releases held them in up
+  to about 50 and 130 times.
 - A signature is refused as malformed when it carries a subpacket of a type
   irongall keeps without reading whose length is not the one RFC 9580 gives
   the type (§5.2.5): Exportable Certification, Revocable, Trust Signature,

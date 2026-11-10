@@ -4,7 +4,7 @@ use alloc::string::ToString as _;
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
-use super::{Certificate, certificates, combine};
+use super::{Certificate, certificates, combine, merge_repeats};
 use crate::armor;
 use crate::key::PublicKey;
 use crate::packet::{self, PacketError, PacketErrorKind, Tag, Version};
@@ -297,16 +297,58 @@ fn repeated_parts_are_held_once() {
         &certification,
     ]));
     assert_eq!(
-        combine([first.clone(), second.clone()]),
+        &*combine([first.clone(), second.clone()]),
         core::slice::from_ref(&together)
     );
     // Those of another primary key are kept apart, in order.
     let [unrelated, ..] = a3();
     let unrelated = only(&framed(&[&unrelated]));
     assert_eq!(
-        combine([first, unrelated.clone(), second]),
+        &*combine([first, unrelated.clone(), second]),
         [together, unrelated]
     );
+}
+
+/// Items that repeat one another are merged into the first of them to
+/// appear, in the order they appear, and the items keep the order in which
+/// they first appear, however the repeats interleave.
+#[test]
+fn repeats_merge_into_the_first_in_order() {
+    let mut items = vec![
+        (3, vec!['a']),
+        (1, vec!['b']),
+        (3, vec!['c']),
+        (2, vec!['d']),
+        (1, vec!['e']),
+        (3, vec!['f']),
+    ];
+    merge_repeats(
+        &mut items,
+        |(key, _), (other, _)| key.cmp(other),
+        |items, same| {
+            let merged: Vec<char> = same
+                .iter()
+                .flat_map(|&index| core::mem::take(&mut items[index].1))
+                .collect();
+            items[same[0]].1 = merged;
+        },
+    );
+    assert_eq!(
+        items,
+        [
+            (3, vec!['a', 'c', 'f']),
+            (1, vec!['b', 'e']),
+            (2, vec!['d'])
+        ]
+    );
+    // Nothing to merge.
+    let mut one = vec![(1, vec!['a'])];
+    merge_repeats(
+        &mut one,
+        |(key, _), (other, _)| key.cmp(other),
+        |_, _| panic!("nothing repeats"),
+    );
+    assert_eq!(one, [(1, vec!['a'])]);
 }
 
 /// A signature of a type that does not belong where it is is passed over,

@@ -670,13 +670,16 @@ impl<'a> Authority<'a> {
     /// public, so anyone can give a signature the prefix that lets it reach
     /// one in the search too. A certificate of uncertain origin, such as a
     /// copy from a keyserver, can therefore make judging it cost time in
-    /// proportion to its size: on the order of a second or two for each
-    /// megabyte of such signatures, under an RSA-2048 or Ed25519 primary
-    /// key, and more under a wider RSA key. It can also hold user IDs added
-    /// without a signature until the search exceeds its bound, and grant
-    /// nothing. [`Keyring::verify`](crate::keyring::Keyring::verify) judges a
-    /// certificate only once one of its keys has made a signature on the
-    /// document.
+    /// proportion to its size. For each megabyte of such signatures, that is
+    /// on the order of a second or two under an RSA-2048 or Ed25519 primary
+    /// key, and it grows with an RSA key's width and exponent: about 5
+    /// seconds under a 4096-bit key and 20 under an 8192-bit key, with the
+    /// exponent 65537, and about a minute under an 8192-bit key with the
+    /// largest exponent irongall accepts, 2^33 - 1. It can also hold user IDs
+    /// added without a signature until the search exceeds its bound, and
+    /// grant nothing. [`Keyring::verify`](crate::keyring::Keyring::verify)
+    /// judges a certificate only once one of its keys has made a signature
+    /// on the document.
     pub fn new(certificate: &'a Certificate, policy: &Policy, now: u64) -> Authority<'a> {
         let statements = Statements::of(certificate, policy);
         let governing = Governing::of(certificate, &statements, policy, now);

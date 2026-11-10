@@ -71,6 +71,11 @@ public API changes, since a verifier's verdicts are part of its contract.
   of version 3, is passed over whatever it states, how much memory reading
   a document or a keyring holds, and the length RFC 8017 holds an RSA
   signature to, which `rsa::PublicKey::verify` does not.
+- `policy::Authority::new` states how much more time judging a certificate
+  can take under a wider RSA primary key than under RSA-2048: up to about
+  a minute for each megabyte of its signatures, under an 8192-bit key with
+  the largest exponent irongall accepts. Earlier releases said only that
+  it takes more.
 
 ## [0.1.1] - 2026-11-01
 

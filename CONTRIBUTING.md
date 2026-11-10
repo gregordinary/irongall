@@ -41,11 +41,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo doc --all-features --no-deps    # RUSTDOCFLAGS='-D warnings'
 cargo +1.91 check --all-targets --all-features    # RUSTFLAGS='-D warnings'
+cargo test --manifest-path memory/Cargo.toml
 cargo deny check licenses advisories sources
 ```
 
 The fifth checks the minimum supported Rust version, which sits below the
-pinned toolchain, and needs that toolchain installed. The last needs
+pinned toolchain, and needs that toolchain installed. The sixth runs the
+memory harness, described below. The last needs
 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny).
 
 ## The public API
@@ -82,6 +84,23 @@ cargo +nightly fuzz run armor -- -dict=armor.dict
 `cargo fuzz list` names the targets. CI builds every target but runs none.
 After changing a parser, run its target for a while before opening the pull
 request.
+
+## Memory
+
+`memory/` holds what reading input allocates to the factors SECURITY.md
+states. It reads input packed with the smallest of each thing irongall holds
+in a structure of its own, such as signatures, subpackets, armor headers,
+certificates, user IDs, and subkeys, under an allocator that counts the
+octets requested of it, and fails if what reading held, or the most it held
+at once, is more times the input's size than SECURITY.md states. Each case
+runs at a power of two and one past it, where a list that grows by doubling
+holds the most room it does not use.
+
+The harness is a workspace of its own, since the counting allocator takes
+the `unsafe` the library forbids. CI runs it under the pinned toolchain, as
+what the standard library's collections request can change between
+releases. A change that raises a factor fails it, and changes SECURITY.md
+and the harness's bounds together.
 
 ## Test vectors
 
@@ -151,10 +170,8 @@ and a case in `divergences.rs` that produces it.
   whose members the input frames before they are read, such as a
   document's signatures or a signature's subpackets, is counted before
   anything is allocated for it; one gathered while reading, such as a
-  certificate's user IDs, is held at its length once complete. Those
-  factors rest on the size of the structure each thing is held in, which
-  a unit test holds; a change that grows one changes the factors
-  SECURITY.md states.
+  certificate's user IDs, is held at its length once complete. The memory
+  harness holds the factors SECURITY.md states (see [Memory](#memory)).
 - **No constant-time code, and no claim of it.** Everything a verification
   computes over is public: the key, the signature, and the signed data. That
   is what makes hand-written cryptography reasonable here, and it leaves

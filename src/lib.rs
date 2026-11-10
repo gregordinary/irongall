@@ -241,8 +241,6 @@ mod wire;
 
 #[cfg(test)]
 mod test_support;
-#[cfg(test)]
-mod tests;
 
 /// The README's example, compiled with the documentation tests so that it
 /// keeps to the API.

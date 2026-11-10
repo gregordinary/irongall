@@ -1,0 +1,21 @@
+[package]
+name = "irongall-memory"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Holds what reading input allocates to the factors SECURITY.md states"
+
+[dependencies]
+irongall = { path = ".." }
+
+# A workspace of its own, so the counting allocator, and the `unsafe` it
+# takes, never join the library's build.
+[workspace]
+members = ["."]
+
+# One process measures one case at a time: the counts are the whole
+# process's, so the cases run in order from `main`, not in parallel as the
+# test harness would run them.
+[[test]]
+name = "memory"
+harness = false

@@ -159,6 +159,22 @@ jobs:
         with:
           command: check licenses advisories sources
 
+  memory:
+    name: Memory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (pinned)
+        run: rustup show
+      - name: Hold reading to the memory SECURITY.md states
+        # A workspace of its own, since its counting allocator takes the
+        # `unsafe` the library forbids. What it counts is the octets requested
+        # of the allocator, which follow how the standard library's
+        # collections grow, so it runs under the pinned toolchain, the one
+        # the factors were measured with.
+        working-directory: memory
+        run: cargo test --locked
+
   fuzz:
     name: Fuzz targets build
     runs-on: ubuntu-latest

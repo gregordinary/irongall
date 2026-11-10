@@ -2,9 +2,7 @@ use alloc::string::ToString as _;
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
-use super::{
-    RevocationCode, Signature, SignatureMaterial, SignatureType, Subpacket, SubpacketType,
-};
+use super::{RevocationCode, Signature, SignatureMaterial, SignatureType, SubpacketType};
 use crate::armor;
 use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyId, PublicKeyAlgorithm};
@@ -811,15 +809,6 @@ fn embedded_signatures_are_read_one_level_deep() {
         failure(&v4(&created(), &subpacket(32, &unread))),
         (PacketErrorKind::MissingCreationTime, 26)
     );
-}
-
-/// SECURITY.md states the memory a signature is held in, which rests on
-/// each subpacket being held apart in four words beside its body: 32 octets
-/// on a 64-bit target, so an area of two-octet subpackets is held in 16
-/// times its size, and the hashed area copied once more.
-#[test]
-fn a_subpacket_is_held_in_four_words() {
-    assert!(core::mem::size_of::<Subpacket>() <= 4 * core::mem::size_of::<usize>());
 }
 
 #[test]

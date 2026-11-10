@@ -58,9 +58,9 @@ public API changes, since a verifier's verdicts are part of its contract.
 - The documentation states more of what irongall does not judge: that
   anyone who handles a certificate can add user IDs until judging it needs
   more than its bound allows, that a statement over MD5 or RIPEMD-160, or
-  of version 3, is passed over whatever it states, how much memory a
-  signature is held in, and the length RFC 8017 holds an RSA signature to,
-  which `rsa::PublicKey::verify` does not.
+  of version 3, is passed over whatever it states, how much memory reading
+  a document or a keyring holds, and the length RFC 8017 holds an RSA
+  signature to, which `rsa::PublicKey::verify` does not.
 
 ## [0.1.1] - 2026-11-01
 

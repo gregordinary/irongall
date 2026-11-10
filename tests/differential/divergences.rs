@@ -563,6 +563,31 @@ fn each_reading_divergence() {
     assert_eq!(seen.len(), 17);
 }
 
+/// A version 6 key whose count covers octets past the material its
+/// algorithm gives, which the packet holds, is told apart by its count, as
+/// one whose count runs past the packet is: irongall refuses it for the
+/// count, and rPGP reads the material and passes over the rest.
+#[test]
+fn a_count_past_the_material() {
+    let point = *ed25519_dalek::SigningKey::from_bytes(&[3; 32])
+        .verifying_key()
+        .as_bytes();
+    let packet = forge::ed25519_key(KeyVersion::V6, &point, make::CREATED);
+    let body = irongall::packet::packets(&packet)
+        .next()
+        .unwrap()
+        .unwrap()
+        .body();
+    // The count is the four octets before the point.
+    let (head, point) = body.split_at(body.len() - 32);
+    let (head, count) = head.split_at(head.len() - 4);
+    assert_eq!(count, 32_u32.to_be_bytes());
+    let counted = [head, &33_u32.to_be_bytes(), point, &[0]].concat();
+    let read = compare::read(&forge::packet(6, &counted)).unwrap();
+    assert_eq!(read.one_sided, [Divergence::MaterialCount]);
+    assert!(read.keys.is_empty());
+}
+
 #[test]
 fn encrypt_only_rsa_material() {
     // A signature naming RSA's encrypt-only variant: irongall reads its

@@ -88,13 +88,20 @@ fn key_into(body: &[u8], found: &mut BTreeSet<Divergence>) -> Option<()> {
     }
     body.take(4)?;
     let algorithm = body.u8()?;
-    if version == 6 {
-        // A four-octet count of the material that follows (§5.5.2.3).
-        let count = body.u32()?;
-        if count != body.0.len() {
-            found.insert(Divergence::MaterialCount);
+    // A version 6 key's four-octet count of the material that follows
+    // (§5.5.2.3), which can differ from what follows, or from the material
+    // the algorithm gives, which can end before what follows does.
+    let count = match version {
+        6 => {
+            let count = body.u32()?;
+            if count != body.0.len() {
+                found.insert(Divergence::MaterialCount);
+            }
+            Some(count)
         }
-    }
+        _ => None,
+    };
+    let material = body.0.len();
     match algorithm {
         // RSA (§5.5.5.1): the modulus and the exponent.
         1..=3 => {
@@ -130,6 +137,9 @@ fn key_into(body: &[u8], found: &mut BTreeSet<Divergence>) -> Option<()> {
             found.insert(Divergence::OpaqueMaterial);
             return None;
         }
+    }
+    if count.is_some_and(|count| count != material - body.0.len()) {
+        found.insert(Divergence::MaterialCount);
     }
     if !body.is_empty() {
         found.insert(Divergence::TrailingMaterial);

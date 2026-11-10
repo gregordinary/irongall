@@ -5,7 +5,7 @@
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
-use super::{Kind, LineEndings, Over, PrimaryChecks, Subject, VerifyError, kinds};
+use super::{Kind, LineEndings, Over, Prefix, PrimaryChecks, Subject, VerifyError, kinds};
 use crate::armor;
 use crate::cert::{self, Certificate};
 use crate::hash::{Context, Digest, HashAlgorithm, HashFunction as _, Sha256};
@@ -861,7 +861,7 @@ fn a_hash_too_short_for_ed25519_is_attributed_but_does_not_verify() {
     assert_eq!(short, 4);
 
     // An RSA signature over SHA-1 rests on a hash its algorithm allows.
-    let rsa = forge::Key::rsa(created);
+    let rsa = forge::Key::rsa(Version::V4, created);
     let signature = forge::read(
         &rsa.sign(SignatureType::BINARY, created)
             .hash(HashAlgorithm::SHA1)
@@ -879,11 +879,12 @@ fn a_hash_too_short_for_ed25519_is_attributed_but_does_not_verify() {
 /// part of that kind, except that a hash too short for an Ed25519 signature
 /// is attributed rather than refused. Its key hashed once for each hash
 /// algorithm, a version 4 check hashes what follows the key, and the count
-/// it gives of what it hashes is exact.
+/// it gives of what it hashes is exact. Checked by the equation alone, a
+/// statement is found over the same part whatever its hash prefix.
 #[test]
 fn a_primary_keys_statements_are_checked_as_verify_checks_them() {
     let created = 1_700_000_000;
-    let mut primaries = vec![forge::Key::rsa(created)];
+    let mut primaries = vec![forge::Key::rsa(Version::V4, created)];
     for version in [Version::V4, Version::V6] {
         primaries.push(forge::Key::ed25519(1, version, created));
     }
@@ -986,6 +987,33 @@ fn a_primary_keys_statements_are_checked_as_verify_checks_them() {
                     assert_eq!(work.hashed, cost as u64);
                 }
                 verified += usize::from(made.is_ok());
+
+                // By the equation alone, the statement is found over the
+                // same part, and with its hash prefix inverted, which no
+                // signature covers, it is still found there, the prefix
+                // reported. Every check that hashes performs the equation.
+                let inverted = forge::read(&forge::with_prefix_inverted(statement));
+                for (signature, prefix) in
+                    [(&signature, Prefix::Matches), (&inverted, Prefix::Differs)]
+                {
+                    let (made, work) =
+                        work::of(|| PrimaryChecks::new(key).made_by_equation(signature, over));
+                    let expected = match expected {
+                        Ok(()) => Ok(prefix),
+                        Err(VerifyError::WrongSubject) => Err(VerifyError::WrongSubject),
+                        Err(_) => Err(VerifyError::BadSignature),
+                    };
+                    assert_eq!(made, expected, "{part}");
+                    assert_eq!(
+                        work.operations,
+                        u64::from(expected != Err(VerifyError::WrongSubject))
+                    );
+                }
+                let expected = match expected {
+                    Err(VerifyError::WrongSubject) => Err(VerifyError::WrongSubject),
+                    _ => Err(VerifyError::HashPrefixMismatch),
+                };
+                assert_eq!(shared.made_by(&inverted, over), expected);
                 cases += 1;
             }
         }

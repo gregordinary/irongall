@@ -517,36 +517,170 @@ pub(crate) mod forge {
         Signature::from_packet(&packet).unwrap()
     }
 
+    /// Where the fields of a version 4 or version 6 Signature packet's body
+    /// lie, from its unhashed area on.
+    struct Layout {
+        /// The width of a subpacket area's length: two octets in version 4,
+        /// four in version 6.
+        width: usize,
+        /// Where the unhashed area's length begins, once the hashed area
+        /// ends.
+        unhashed: usize,
+        /// Where the hash prefix begins, once the unhashed area ends.
+        prefix: usize,
+        /// Where the material begins: after the hash prefix, and in version
+        /// 6, the salt.
+        material: usize,
+    }
+
+    impl Layout {
+        fn of(body: &[u8]) -> Layout {
+            let width = match body[0] {
+                4 => 2,
+                6 => 4,
+                version => panic!("a version {version} signature"),
+            };
+            let length = |at: usize| {
+                body[at..at + width]
+                    .iter()
+                    .fold(0, |length, &octet| length << 8 | usize::from(octet))
+            };
+            let unhashed = 4 + width + length(4);
+            let prefix = unhashed + width + length(unhashed);
+            let material = match width {
+                2 => prefix + 2,
+                _ => prefix + 3 + usize::from(body[prefix + 2]),
+            };
+            Layout {
+                width,
+                unhashed,
+                prefix,
+                material,
+            }
+        }
+    }
+
+    /// The body of the one Signature packet `signature` holds.
+    fn body_of(signature: &[u8]) -> &[u8] {
+        let mut packets = packet::packets(signature);
+        let packet = packets.next().unwrap().unwrap();
+        assert_eq!(packet.tag(), Tag::SIGNATURE);
+        assert!(packets.next().is_none());
+        packet.body()
+    }
+
     /// The Signature packet `signature` with its unhashed area replaced by
     /// what `amend` makes of it, as anyone who handles the signature can
     /// replace it: the hashed fields, the hash prefix, and the material are
     /// as they were.
     pub(crate) fn with_unhashed(signature: &[u8], amend: impl FnOnce(&[u8]) -> Vec<u8>) -> Vec<u8> {
-        let mut packets = packet::packets(signature);
-        let body = packets.next().unwrap().unwrap().body();
-        assert!(packets.next().is_none());
-        let width = match body[0] {
-            4 => 2,
-            6 => 4,
-            version => panic!("a version {version} signature"),
-        };
-        let length = |at: usize| {
-            body[at..at + width]
-                .iter()
-                .fold(0, |length, &octet| length << 8 | usize::from(octet))
-        };
-        let hashed_end = 4 + width + length(4);
-        let (start, end) = (hashed_end + width, hashed_end + width + length(hashed_end));
-        let area = amend(&body[start..end]);
+        let body = body_of(signature);
+        let Layout {
+            width,
+            unhashed,
+            prefix,
+            ..
+        } = Layout::of(body);
+        let area = amend(&body[unhashed + width..prefix]);
         let area_length = area.len().to_be_bytes();
         let body = [
-            &body[..hashed_end],
+            &body[..unhashed],
             &area_length[area_length.len() - width..],
             &area,
-            &body[end..],
+            &body[prefix..],
         ]
         .concat();
         packet(Tag::SIGNATURE, &body)
+    }
+
+    /// The Signature packet `signature` with the first octet of its hash
+    /// prefix inverted, as anyone who handles the signature can change it:
+    /// the prefix is covered by no signature.
+    pub(crate) fn with_prefix_inverted(signature: &[u8]) -> Vec<u8> {
+        let mut body = body_of(signature).to_vec();
+        let prefix = Layout::of(&body).prefix;
+        body[prefix] ^= 0xFF;
+        packet(Tag::SIGNATURE, &body)
+    }
+
+    /// The Signature packet `signature` with `octets` after its material,
+    /// as anyone who handles the signature can add them: the packet's
+    /// length is framing, covered by no signature.
+    pub(crate) fn with_appended(signature: &[u8], octets: &[u8]) -> Vec<u8> {
+        packet(Tag::SIGNATURE, &[body_of(signature), octets].concat())
+    }
+
+    /// A way of writing an integer of a signature's material other than
+    /// exactly, as RFC 9580 §3.2 requires of version 6, that leaves its value
+    /// unchanged. No signature covers how the integer is written.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Encoding {
+        /// With a zero octet before it, which its length counts: a length
+        /// eight bits longer than its value. Version 4 tolerates it.
+        LeadingZero,
+        /// With a length one bit longer than its value, within the same
+        /// octets. Version 4 tolerates it.
+        Overstated,
+        /// With a length one bit shorter than its value, within the same
+        /// octets, so that the length leaves a bit the value sets uncounted.
+        Understated,
+    }
+
+    impl Encoding {
+        pub(crate) const ALL: [Encoding; 3] = [
+            Encoding::LeadingZero,
+            Encoding::Overstated,
+            Encoding::Understated,
+        ];
+
+        /// Whether a version 4 signature whose integers are so written reads
+        /// as one irongall honors.
+        pub(crate) fn tolerated_in_version_4(self) -> bool {
+            self != Encoding::Understated
+        }
+
+        /// The integer of `bits` and `octets`, an exact encoding, written
+        /// this way, or `None` if it cannot be within its octets.
+        fn write(self, bits: usize, octets: &[u8]) -> Option<Vec<u8>> {
+            let (bits, octets) = match self {
+                Encoding::LeadingZero => (bits + 8, [&[0][..], octets].concat()),
+                Encoding::Overstated if !bits.is_multiple_of(8) => (bits + 1, octets.to_vec()),
+                Encoding::Understated if bits % 8 != 1 => (bits - 1, octets.to_vec()),
+                _ => return None,
+            };
+            Some([&u16::try_from(bits).unwrap().to_be_bytes()[..], &octets].concat())
+        }
+    }
+
+    /// The Signature packet `signature`, of RSA or of EdDSALegacy, with every
+    /// integer of its material that can be written as `encoding` says so
+    /// written, or `None` if none can: its material is not integers, or no
+    /// integer's length allows it.
+    pub(crate) fn with_integers(signature: &[u8], encoding: Encoding) -> Option<Vec<u8>> {
+        let body = body_of(signature);
+        let at = Layout::of(body).material;
+        let count = match body[2] {
+            1..=3 => 1,
+            22 => 2,
+            _ => return None,
+        };
+        let mut material = Vec::new();
+        let mut rest = &body[at..];
+        let mut written = 0;
+        for _ in 0..count {
+            let bits = usize::from(u16::from_be_bytes([rest[0], rest[1]]));
+            let (octets, after) = rest[2..].split_at(bits.div_ceil(8));
+            match encoding.write(bits, octets) {
+                Some(integer) => {
+                    material.extend(integer);
+                    written += 1;
+                }
+                None => material.extend_from_slice(&rest[..2 + octets.len()]),
+            }
+            rest = after;
+        }
+        assert!(rest.is_empty());
+        (written > 0).then(|| packet(Tag::SIGNATURE, &[&body[..at], &material].concat()))
     }
 
     /// A multiprecision integer (RFC 9580 §3.2) of the big-endian `value`.
@@ -660,18 +794,22 @@ pub(crate) mod forge {
             Key::new(Secret::Ed25519(secret), &body)
         }
 
-        /// The RSA test key, of 2048 bits, in a version 4 key created at
+        /// The RSA test key, of 2048 bits, in a key of `version` created at
         /// `created`.
-        pub(crate) fn rsa(created: u32) -> Key {
+        pub(crate) fn rsa(version: Version, created: u32) -> Key {
             let modulus = hex(RSA_MODULUS);
-            let body = [
-                &[4][..],
-                &created.to_be_bytes(),
-                &[1],
-                &mpi(&modulus),
-                &mpi(&[0x01, 0x00, 0x01]),
-            ]
-            .concat();
+            let material = [mpi(&modulus), mpi(&[0x01, 0x00, 0x01])].concat();
+            let body = match version {
+                Version::V4 => [&[4][..], &created.to_be_bytes(), &[1], &material].concat(),
+                Version::V6 => [
+                    &[6][..],
+                    &created.to_be_bytes(),
+                    &[1],
+                    &u32::try_from(material.len()).unwrap().to_be_bytes(),
+                    &material,
+                ]
+                .concat(),
+            };
             let secret = Secret::Rsa {
                 modulus: BigUint::from_bytes_be(&modulus),
                 exponent: BigUint::from_bytes_be(&hex(RSA_PRIVATE_EXPONENT)),

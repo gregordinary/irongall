@@ -261,14 +261,15 @@ struct Signatures {
     /// Those that read only when what irongall cannot honor is overlooked
     /// ([`Signature::from_packet_unhonored`]): a hashed subpacket marked
     /// critical whose meaning irongall does not implement, a malformed
-    /// subpacket, or an unhashed area or embedded signature that does not
-    /// read. The certificate's [`skipped`](Certificate::skipped) records
-    /// each as passed over, and nothing may act on what one grants. Judging
-    /// the certificate weighs them in one direction only: a revocation among
-    /// them that verifies still revokes, and a self-signature among them
-    /// that verifies and would govern keeps an older one from governing in
-    /// its place, since passing over either would leave in force what its
-    /// maker withdrew.
+    /// subpacket, an unhashed area or embedded signature that does not read,
+    /// octets after the material, or an integer of the material whose length
+    /// is not written as RFC 9580 requires. The certificate's
+    /// [`skipped`](Certificate::skipped) records each as passed over, and
+    /// nothing may act on what one grants. Judging the certificate weighs
+    /// them in one direction only: a revocation among them that verifies
+    /// still revokes, and a self-signature among them that verifies and would
+    /// govern keeps an older one from governing in its place, since passing
+    /// over either would leave in force what its maker withdrew.
     unhonored: Vec<Signature>,
 }
 

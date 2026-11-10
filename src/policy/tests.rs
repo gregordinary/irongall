@@ -7,6 +7,7 @@ use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
+use super::statements::Statements;
 use super::{Authority, Policy, Reason, Window};
 use crate::cert::{Certificate, UserId};
 use crate::hash::HashAlgorithm;
@@ -144,7 +145,7 @@ fn forged_signatures_verify() {
     let keys = [
         ed25519(1),
         Key::ed25519(2, Version::V6, CREATED),
-        Key::rsa(CREATED),
+        Key::rsa(Version::V4, CREATED),
     ];
     for key in &keys {
         let other = Key::ed25519(9, key.public().version(), CREATED);
@@ -778,7 +779,7 @@ fn a_signature_without_a_creation_time_is_not_read() {
 
 #[test]
 fn a_signature_over_a_hash_the_policy_refuses_is_refused() {
-    let rsa = Key::rsa(CREATED);
+    let rsa = Key::rsa(Version::V4, CREATED);
     let certificate = archive(&rsa, &ed25519(2));
     let sha1 = rsa
         .sign(SignatureType::TEXT, SIGNED)
@@ -848,7 +849,7 @@ fn a_policy_may_refuse_text_signatures() {
 /// one.
 #[test]
 fn a_refused_signature_does_not_mask_an_accepted_one_from_the_same_key() {
-    let rsa = Key::rsa(CREATED);
+    let rsa = Key::rsa(Version::V4, CREATED);
     let certificate = archive(&rsa, &ed25519(2));
     let sha1 = rsa
         .sign(SignatureType::TEXT, SIGNED)
@@ -868,7 +869,7 @@ fn a_refused_signature_does_not_mask_an_accepted_one_from_the_same_key() {
 #[test]
 fn a_defective_newest_binding_refuses_rather_than_reviving_a_superseded_one() {
     let subkey = ed25519(2);
-    for primary in [ed25519(1), Key::rsa(CREATED)] {
+    for primary in [ed25519(1), Key::rsa(Version::V4, CREATED)] {
         let rsa = primary.public().algorithm() == crate::key::PublicKeyAlgorithm::RSA;
         let broad = binding(&primary, &subkey, CREATED, SIGN);
         let later = |flags: u8| {
@@ -940,7 +941,7 @@ fn a_tie_between_bindings_fails_closed() {
 #[test]
 fn a_signing_subkey_without_a_back_signature_is_refused() {
     let (primary, subkey) = (ed25519(1), ed25519(2));
-    let rsa = Key::rsa(CREATED);
+    let rsa = Key::rsa(Version::V4, CREATED);
     let unbacked = |back: Option<Vec<u8>>| {
         let mut signing = primary
             .sign(SignatureType::SUBKEY_BINDING, CREATED)
@@ -1235,7 +1236,7 @@ fn a_future_dated_self_signature_does_not_govern() {
 /// The policy's RSA floor reads the modulus's width exactly.
 #[test]
 fn the_rsa_floor_reads_the_modulus() {
-    let rsa = Key::rsa(CREATED);
+    let rsa = Key::rsa(Version::V4, CREATED);
     for bits in [1024_usize, 2047, 2048, 3072, 4096, 8192, 8193] {
         // The top bit set, so the modulus is exactly `bits` wide, and odd.
         let mut modulus = vec![0u8; bits.div_ceil(8)];
@@ -1285,7 +1286,7 @@ fn the_rsa_floor_reads_the_modulus() {
 /// and not for the signatures over it, none of which can verify.
 #[test]
 fn a_key_irongall_does_not_verify_with_is_refused_for_itself() {
-    let rsa = Key::rsa(CREATED);
+    let rsa = Key::rsa(Version::V4, CREATED);
     let body = rsa.public().body();
     // [4, created, algorithm, n, e], each integer a two-octet bit count and
     // its octets.
@@ -1367,7 +1368,7 @@ fn a_key_irongall_does_not_verify_with_is_refused_for_itself() {
 /// before any signature over the subkey is verified.
 #[test]
 fn a_key_the_policy_refuses_cannot_sign() {
-    let rsa = Key::rsa(CREATED);
+    let rsa = Key::rsa(Version::V4, CREATED);
     let strict = Policy::new().with_rsa_minimum_bits(3072);
 
     let certificate = archive(&rsa, &ed25519(2));
@@ -2387,18 +2388,118 @@ const DAMAGE: [&[u8]; 4] = [
     &[0x05, 0x10],
 ];
 
-/// A signature damaged where its signer's signature does not cover it, in
-/// its unhashed area, no longer reads, and grants nothing. What it
-/// restricts, it still restricts, since anyone who handles the certificate
-/// can damage that area: a revocation still revokes, and a newer
-/// self-signature or binding that withholds signing, or the withdrawal of a
-/// self-signature, refuses the certificate or the subkey rather than letting
-/// what it superseded govern.
+/// A Signature packet changed where no signature covers it.
+#[derive(Debug)]
+struct Altered {
+    /// How it was changed.
+    how: String,
+    /// For a change to how the integers of its material are written, how
+    /// they are.
+    encoding: Option<forge::Encoding>,
+    /// The packet.
+    packet: Vec<u8>,
+    /// Whether it still reads as a signature irongall honors.
+    reads: bool,
+    /// Whether irongall honors it as a certificate's statement: it reads,
+    /// and its hash prefix is its hash's.
+    honored: bool,
+}
+
+/// The ways anyone who handles `signature` can change it without touching
+/// what its signature covers: its unhashed area damaged as each of
+/// [`DAMAGE`] damages it, its hash prefix inverted, an octet appended after
+/// its material, and the integers of its material written each way
+/// [`forge::Encoding`] names, where they can be. Version 4 tolerates an
+/// integer whose length counts leading zeros, so such a signature is still
+/// honored; nothing else is.
+fn altered(signature: &[u8]) -> Vec<Altered> {
+    let version = forge::read(signature).version();
+    let mut altered: Vec<Altered> = DAMAGE
+        .iter()
+        .map(|damage| Altered {
+            how: format!("unhashed {damage:02X?}"),
+            encoding: None,
+            packet: forge::with_unhashed(signature, |area| [area, damage].concat()),
+            reads: false,
+            honored: false,
+        })
+        .collect();
+    altered.push(Altered {
+        how: "prefix".to_string(),
+        encoding: None,
+        packet: forge::with_prefix_inverted(signature),
+        reads: true,
+        honored: false,
+    });
+    altered.push(Altered {
+        how: "appended".to_string(),
+        encoding: None,
+        packet: forge::with_appended(signature, &[0x00]),
+        reads: false,
+        honored: false,
+    });
+    for encoding in forge::Encoding::ALL {
+        if let Some(packet) = forge::with_integers(signature, encoding) {
+            let tolerated = version == Version::V4 && encoding.tolerated_in_version_4();
+            altered.push(Altered {
+                how: format!("{encoding:?}"),
+                encoding: Some(encoding),
+                packet,
+                reads: tolerated,
+                honored: tolerated,
+            });
+        }
+    }
+    for altered in &altered {
+        let packet = packet::packets(&altered.packet).next().unwrap().unwrap();
+        assert_eq!(
+            Signature::from_packet(&packet).is_ok(),
+            altered.reads,
+            "{}",
+            altered.how
+        );
+        assert!(
+            Signature::from_packet_unhonored(&packet).is_ok(),
+            "{}",
+            altered.how
+        );
+    }
+    altered
+}
+
+/// The primary keys of the certificates the tests alter: Ed25519 and RSA,
+/// each in version 4 and version 6, with an Ed25519 subkey of the same
+/// version.
+fn primaries() -> [(Key, Key); 4] {
+    [Version::V4, Version::V6]
+        .map(|version| Key::ed25519(1, version, CREATED))
+        .into_iter()
+        .chain([Version::V4, Version::V6].map(|version| Key::rsa(version, CREATED)))
+        .map(|primary| {
+            let subkey = Key::ed25519(2, primary.public().version(), CREATED);
+            (primary, subkey)
+        })
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
+
+/// A signature changed where its signer's signature does not cover it,
+/// which anyone who handles the certificate can do, grants nothing, unless
+/// it still reads and verifies as it was made. What it restricts, it still
+/// restricts: a revocation still revokes, and a newer self-signature or
+/// binding that withholds signing, or the withdrawal of a self-signature,
+/// refuses the certificate or the subkey rather than letting what it
+/// superseded govern. The changes: its unhashed area damaged, its hash
+/// prefix inverted, an octet appended after its material, and the integers
+/// of its material written other than exactly. Finding what each is over
+/// takes the public-key operations it took before it was changed: one, over
+/// the part it is placed with.
 #[test]
-fn a_restriction_damaged_where_nothing_covers_it_still_restricts() {
-    for version in [Version::V4, Version::V6] {
-        let primary = Key::ed25519(1, version, CREATED);
-        let subkey = Key::ed25519(2, version, CREATED);
+fn a_restriction_altered_where_nothing_covers_it_still_restricts() {
+    let mut encodings = Vec::new();
+    for (primary, subkey) in primaries() {
+        let version = primary.public().version();
         let documents = [signed(&primary, SIGNED), signed(&subkey, SIGNED)];
         let later = CREATED + DAY;
         let direct = |created: u32, flags: u8| {
@@ -2430,12 +2531,6 @@ fn a_restriction_damaged_where_nothing_covers_it_still_restricts() {
         for document in &documents {
             assert!(verdict(&with(ON_KEY, &[]), &[document]).is_ok());
         }
-        let damaged = |signature: &[u8], damage: &[u8]| {
-            let damaged = forge::with_unhashed(signature, |area| [area, damage].concat());
-            let packet = packet::packets(&damaged).next().unwrap().unwrap();
-            assert!(Signature::from_packet(&packet).is_err(), "{damage:?}");
-            damaged
-        };
 
         let revocation = primary
             .sign(SignatureType::KEY_REVOCATION, later)
@@ -2490,50 +2585,103 @@ fn a_restriction_damaged_where_nothing_covers_it_still_restricts() {
         ];
         for (slot, restriction, document, undamaged, reason) in cases {
             let document = &documents[document];
+            let attributed = |certificate: &Certificate| {
+                work::of(|| Statements::of(certificate, &Policy::new())).1
+            };
+            let as_made = attributed(&with(slot, restriction));
             assert_eq!(
                 verdict(&with(slot, restriction), &[document]),
                 Err(undamaged)
             );
-            for damage in DAMAGE {
+            for altered in altered(restriction) {
+                let expected = if altered.honored { undamaged } else { reason };
+                let certificate = with(slot, &altered.packet);
                 assert_eq!(
-                    verdict(&with(slot, &damaged(restriction, damage)), &[document]),
-                    Err(reason),
-                    "{version:?} {undamaged:?} {damage:?}"
+                    verdict(&certificate, &[document]),
+                    Err(expected),
+                    "{version:?} {undamaged:?} {}",
+                    altered.how
                 );
+                assert_eq!(
+                    attributed(&certificate).operations,
+                    as_made.operations,
+                    "{}",
+                    altered.how
+                );
+                if let Some(encoding) = altered.encoding {
+                    encodings.push((version, encoding, altered.honored));
+                }
             }
         }
         // Withdrawn, the direct-key signature no longer binds a version 6
-        // key; damaged, the withdrawal leaves it in force, unhonored.
+        // key; altered, the withdrawal leaves it in force, unhonored. So
+        // too after the user ID, where the withdrawal is tried over the user
+        // ID and then over the primary key alone.
         let undamaged = match version {
             Version::V4 => Ok(()),
             Version::V6 => Err(Reason::MissingDirectKeySignature),
         };
-        assert_eq!(
-            standings(&with(ON_KEY, &withdrawal), NOW)[0].map(|_| ()),
-            undamaged
-        );
-        for damage in DAMAGE {
-            let certificate = with(ON_KEY, &damaged(&withdrawal, damage));
+        for slot in [ON_KEY, ON_USER_ID] {
             assert_eq!(
-                standings(&certificate, NOW)[0],
-                Err(Reason::UnhonoredSelfSignature),
-                "{version:?} {damage:?}"
+                standings(&with(slot, &withdrawal), NOW)[0].map(|_| ()),
+                undamaged
             );
+            for altered in altered(&withdrawal) {
+                let certificate = with(slot, &altered.packet);
+                let expected = if altered.honored {
+                    undamaged
+                } else {
+                    Err(Reason::UnhonoredSelfSignature)
+                };
+                assert_eq!(
+                    standings(&certificate, NOW)[0].map(|_| ()),
+                    expected,
+                    "{version:?} {slot} {}",
+                    altered.how
+                );
+            }
         }
 
-        // The only binding, damaged, grants nothing.
-        for damage in DAMAGE {
+        // The only binding, altered, grants nothing, and is recorded as
+        // passed over where it does not read.
+        for altered in altered(&binding(&primary, &subkey, CREATED, SIGN)) {
             let certificate = forge::certificate(&[
                 &primary.primary(),
                 &direct(CREATED, CERTIFY | SIGN),
                 &subkey.subkey(),
-                &damaged(&binding(&primary, &subkey, CREATED, SIGN), damage),
+                &altered.packet,
             ]);
+            let expected = if altered.honored {
+                Ok(subkey.public().fingerprint())
+            } else {
+                Err(Reason::UnhonoredBinding)
+            };
             assert_eq!(
                 verdict(&certificate, &[&documents[1]]),
-                Err(Reason::UnhonoredBinding)
+                expected,
+                "{version:?} {}",
+                altered.how
             );
-            assert_eq!(certificate.skipped().len(), 1);
+            assert_eq!(
+                certificate.skipped().len(),
+                usize::from(!altered.reads),
+                "{}",
+                altered.how
+            );
+        }
+    }
+    // Every way of writing an integer was tried in both versions, and
+    // version 4 tolerated all but one.
+    for version in [Version::V4, Version::V6] {
+        for encoding in forge::Encoding::ALL {
+            let tried: Vec<bool> = encodings
+                .iter()
+                .filter(|&&(held, written, _)| held == version && written == encoding)
+                .map(|&(_, _, honored)| honored)
+                .collect();
+            assert!(!tried.is_empty(), "{version:?} {encoding:?}");
+            let tolerated = version == Version::V4 && encoding.tolerated_in_version_4();
+            assert!(tried.iter().all(|&honored| honored == tolerated));
         }
     }
 }
@@ -2875,7 +3023,7 @@ fn a_postdated_signature_is_refused() {
 #[test]
 fn a_self_signature_over_a_weak_hash_grants_but_is_not_preferred() {
     // RSA, since Ed25519 verifies over no hash narrower than 256 bits.
-    let primary = Key::rsa(CREATED);
+    let primary = Key::rsa(Version::V4, CREATED);
     let second = "archive <second@example.invalid>";
     let sha1 = |created: u32| {
         primary
@@ -2944,7 +3092,7 @@ fn a_recent_self_signature_over_a_weak_hash_refuses_its_certificate() {
     /// 2023-02-01, stated here apart from the policy's own constant.
     const FEBRUARY_2023: u32 = 1_675_209_600;
     // RSA, since Ed25519 verifies over no hash narrower than 256 bits.
-    let primary = Key::rsa(CREATED);
+    let primary = Key::rsa(Version::V4, CREATED);
     let document = signed(&primary, SIGNED);
     let second = "archive <second@example.invalid>";
     let sha1 = |signature_type: SignatureType, created: u32| {
@@ -3075,7 +3223,7 @@ fn statements_over_sha3_count() {
     for primary in [
         Key::ed25519(1, Version::V4, CREATED),
         Key::ed25519(1, Version::V6, CREATED),
-        Key::rsa(CREATED),
+        Key::rsa(Version::V4, CREATED),
     ] {
         let direct = primary
             .sign(SignatureType::DIRECT_KEY, CREATED)
@@ -3344,16 +3492,16 @@ fn nothing_dated_before_the_keys_counts() {
     );
 }
 
-/// Certificates that each restrict what they grant, by every kind of
-/// statement a certificate makes about itself, as their packets: a revoked
-/// subkey, a subkey whose newer binding withholds signing, a revoked
-/// certificate, a withdrawn direct-key signature, a newer certification that
-/// shortens the key's life, an expiring back-signature, in the binding's
-/// unhashed area and in its hashed area, a newer direct-key signature that
-/// withholds signing, and a withdrawn user ID that alone bound the key.
-fn restricted(version: Version) -> Vec<Vec<Vec<u8>>> {
-    let primary = Key::ed25519(1, version, CREATED);
-    let subkey = Key::ed25519(2, version, CREATED);
+/// Certificates of `primary` and `subkey` that each restrict what they
+/// grant, by every kind of statement a certificate makes about itself, as
+/// their packets: a revoked subkey, a subkey whose newer binding withholds
+/// signing, a revoked certificate, a withdrawn direct-key signature, a newer
+/// certification that shortens the key's life, an expiring back-signature,
+/// in the binding's unhashed area and in its hashed area, a newer direct-key
+/// signature that withholds signing, and a withdrawn user ID that alone
+/// bound the key.
+fn restricted(primary: &Key, subkey: &Key) -> Vec<Vec<Vec<u8>>> {
+    let (primary, subkey) = (primary.clone(), subkey.clone());
     let later = CREATED + DAY;
     let direct = |created: u32, flags: u8| {
         primary
@@ -3446,10 +3594,11 @@ fn within(after: Result<Window, Reason>, before: Result<Window, Reason>) -> bool
 
 /// The certificates made from `packets` by rewriting what none of their
 /// signatures covers: repeating a user ID or subkey with only one of the
-/// signatures over it, replacing or damaging a signature's unhashed area,
-/// putting a User ID, User Attribute, or Subkey packet before a signature,
-/// and moving a signature to follow the primary key or to the end. The
-/// packets are of a certificate of `version`.
+/// signatures over it, replacing a signature's unhashed area or changing it
+/// in each of the ways [`altered`] does, putting a User ID, User Attribute,
+/// or Subkey packet before a signature, and moving a signature to follow the
+/// primary key or to the end. The packets are of a certificate of
+/// `version`.
 fn rewritten(packets: &[Vec<u8>], version: Version) -> Vec<Vec<Vec<u8>>> {
     let tag = |packet: &[u8]| packet::packets(packet).next().unwrap().unwrap().tag();
     let mut rewrites = Vec::new();
@@ -3466,16 +3615,13 @@ fn rewritten(packets: &[Vec<u8>], version: Version) -> Vec<Vec<Vec<u8>>> {
                 }
             }
             Tag::SIGNATURE => {
-                // Emptied, naming another issuer, and damaged.
+                // Its unhashed area emptied or naming another issuer, and
+                // every other change no signature covers.
                 let mut amended = vec![
                     forge::with_unhashed(part, |_| Vec::new()),
                     forge::with_unhashed(part, |_| [&[9, 16][..], &[0x99; 8]].concat()),
                 ];
-                amended.extend(
-                    DAMAGE
-                        .iter()
-                        .map(|damage| forge::with_unhashed(part, |area| [area, damage].concat())),
-                );
+                amended.extend(altered(part).into_iter().map(|altered| altered.packet));
                 for signature in amended {
                     let mut rewrite = packets.to_vec();
                     rewrite[at] = signature;
@@ -3505,16 +3651,19 @@ fn rewritten(packets: &[Vec<u8>], version: Version) -> Vec<Vec<Vec<u8>>> {
 
 /// Rewriting what none of a certificate's signatures covers, which anyone
 /// who handles the certificate can do, widens nothing it grants: repeating a
-/// part with only an older signature over it, changing or damaging a
-/// signature's unhashed area, inserting a packet before a statement or
-/// moving it, or combining the certificate with an older copy of itself, in
-/// either order. Each certificate here restricts what it grants by
-/// another kind of statement, and every rewrite is tried at every place.
+/// part with only an older signature over it, changing a signature's
+/// unhashed area, hash prefix, length, or how the integers of its material
+/// are written, inserting a packet before a statement or moving it, or
+/// combining the certificate with an older copy of itself, in either order.
+/// Each certificate here restricts what it grants by another kind of
+/// statement, under an Ed25519 and an RSA primary key of each version, and
+/// every rewrite is tried at every place.
 #[test]
 fn what_no_signature_covers_widens_nothing() {
     let mut tried = 0;
-    for version in [Version::V4, Version::V6] {
-        for packets in restricted(version) {
+    for (primary, subkey) in primaries() {
+        let version = primary.public().version();
+        for packets in restricted(&primary, &subkey) {
             let parts: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
             let certificate = forge::certificate(&parts);
             let before = by_fingerprint(&certificate);
@@ -3552,7 +3701,7 @@ fn what_no_signature_covers_widens_nothing() {
             }
         }
     }
-    assert_eq!(tried, 1036);
+    assert_eq!(tried, 2625);
 }
 
 #[test]

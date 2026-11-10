@@ -30,8 +30,11 @@
 //! is established the same way, by verifying it over that part, never by
 //! where it is placed, since the order of a certificate's packets is
 //! covered by no signature either. A statement that does not verify over
-//! the part it is placed with is tried over every other part it may be
-//! over, and counts over the one it verifies over.
+//! the part it is placed with is tried over the other parts it may be over,
+//! by its equation wherever its hash prefix matches, and counts over the one
+//! it verifies over. The prefix, the first two octets of the signature's
+//! hash, is not covered by the signature, so over the part a statement is
+//! placed with, its equation is checked whatever its prefix.
 //!
 //! That search is bounded by the certificate's size. A certificate as its
 //! maker wrote it places each of its own statements where it verifies, so
@@ -108,10 +111,13 @@
 //! self-signature or binding that governs, or withdraws one. irongall does
 //! not honor a signature that carries a critical subpacket it does not
 //! implement, or that is malformed only where verifying it does not look: a
-//! subpacket of the wrong form, or an embedded signature or an unhashed area
-//! that does not read. Nothing in the unhashed area is covered by the
-//! signature, so passing over such a signature would let anyone who handles
-//! the certificate lift a restriction by damaging a subpacket there.
+//! subpacket of the wrong form, an embedded signature or an unhashed area
+//! that does not read, octets after its material, or an integer of its
+//! material whose length is not written as RFC 9580 requires (§3.2). Nor does
+//! it honor a certificate's statement whose hash prefix is not its hash's
+//! (§5.2.3.6). None of these is covered by the signature, so passing over
+//! such a signature would let anyone who handles the certificate lift a
+//! restriction by changing them.
 //!
 //! An Ed25519 signature over a hash shorter than 256 bits never verifies
 //! (RFC 9580 §5.2.3.3 and §5.2.3.4), but its equation still establishes the
@@ -493,8 +499,9 @@ pub enum Reason {
     /// A self-signature that governs the certificate's primary key is one
     /// irongall does not honor, or a certification revocation that withdraws
     /// one is: it carries a critical subpacket whose meaning irongall does not
-    /// implement, or is malformed where verifying it does not look (see the
-    /// [module documentation](self)).
+    /// implement, is malformed where verifying it does not look, or carries
+    /// a hash prefix that is not its hash's (see the [module
+    /// documentation](self)).
     UnhonoredSelfSignature,
     /// A self-signature that governs the certificate's primary key, or a
     /// certification revocation that withdraws one, rests on a hash on which
@@ -521,10 +528,10 @@ pub enum Reason {
     UnboundSubkey,
     /// The subkey's governing binding is one irongall does not honor: it
     /// carries a critical subpacket whose meaning irongall does not
-    /// implement, is malformed where verifying it does not look, or embeds
-    /// in its unhashed area a back-signature that states an expiration,
-    /// which the binding does not cover (see the [module
-    /// documentation](self)).
+    /// implement, is malformed where verifying it does not look, carries a
+    /// hash prefix that is not its hash's, or embeds in its unhashed area a
+    /// back-signature that states an expiration, which the binding does not
+    /// cover (see the [module documentation](self)).
     UnhonoredBinding,
     /// The subkey's governing binding rests on a hash the policy does not
     /// accept, or on one shorter than its public-key algorithm allows.
@@ -647,15 +654,18 @@ impl<'a> Authority<'a> {
     /// hashes at most 128 octets for each octet of them (see the [module
     /// documentation](self)).
     ///
-    /// Everything a signature is hashed over is public, so anyone can give a
-    /// signature the two-octet hash prefix that lets it reach its public-key
-    /// operation. A certificate of uncertain origin, such as a copy from a
-    /// keyserver, can therefore make judging it cost time in proportion to
-    /// its size: on the order of a second or two for each megabyte of such
-    /// signatures, under an RSA-2048 or Ed25519 primary key, and more under
-    /// a wider RSA key. [`Keyring::verify`](crate::keyring::Keyring::verify)
-    /// judges a certificate only once one of its keys has made a signature
-    /// on the document.
+    /// A signature of the primary key's version and algorithm reaches its
+    /// public-key operation over the part it is placed with, whatever its
+    /// two-octet hash prefix, and everything a signature is hashed over is
+    /// public, so anyone can give a signature the prefix that lets it reach
+    /// one in the search too. A certificate of uncertain origin, such as a
+    /// copy from a keyserver, can therefore make judging it cost time in
+    /// proportion to its size: on the order of a second or two for each
+    /// megabyte of such signatures, under an RSA-2048 or Ed25519 primary
+    /// key, and more under a wider RSA key.
+    /// [`Keyring::verify`](crate::keyring::Keyring::verify) judges a
+    /// certificate only once one of its keys has made a signature on the
+    /// document.
     pub fn new(certificate: &'a Certificate, policy: &Policy, now: u64) -> Authority<'a> {
         let statements = Statements::of(certificate, policy);
         let governing = Governing::of(certificate, &statements, policy, now);

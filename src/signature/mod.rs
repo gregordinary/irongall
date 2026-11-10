@@ -81,7 +81,7 @@ use alloc::vec::Vec;
 
 pub use subpacket::{KeyFlags, RevocationCode, RevocationReason, Subpacket, SubpacketType};
 pub use verify::{DocumentHash, Subject, VerifyError};
-pub(crate) use verify::{Over, PrimaryChecks, check_verifying_key};
+pub(crate) use verify::{Over, Prefix, PrimaryChecks, check_verifying_key};
 
 use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyId, PublicKeyAlgorithm};
@@ -191,22 +191,26 @@ impl Signature {
     }
 
     /// Reads a Signature packet as [`from_packet`](Self::from_packet) does,
-    /// except that what irongall reads a signature only to act on what it
-    /// grants does not refuse it: a hashed subpacket marked critical whose
-    /// meaning irongall does not implement, a subpacket of a type irongall
-    /// decodes that is malformed, and an embedded signature that does not
-    /// read, each of which is overlooked, and an unhashed area whose
-    /// subpackets do not read, which is taken for an empty one. What
-    /// verifying the signature needs must read: its structure, its hashed
-    /// area's subpackets, and its creation time.
+    /// except that neither what irongall reads a signature only to act on
+    /// what it grants, nor how a part no signature covers is written, refuses
+    /// it: a hashed subpacket marked critical whose meaning irongall does not
+    /// implement, a subpacket of a type irongall decodes that is malformed,
+    /// and an embedded signature that does not read, each of which is
+    /// overlooked; an unhashed area whose subpackets do not read, which is
+    /// taken for an empty one; octets after the material, which are passed
+    /// over; and an integer of the material whose length is not written as
+    /// RFC 9580 §3.2 requires, whose value is read regardless. What verifying
+    /// the signature needs must read: its structure, its hashed area's
+    /// subpackets, its creation time, and the values of its material.
     ///
     /// Such a signature is one irongall cannot honor, and nothing may act on
     /// what it grants. It exists so that judging a certificate can weigh it
     /// as a statement its maker still made: a revocation that revokes, or a
     /// newer self-signature that keeps an older one from governing. The
-    /// unhashed area is covered by no signature, so without this, anyone who
+    /// unhashed area, the packet's length, and the lengths of the material's
+    /// integers are covered by no signature, so without this, anyone who
     /// handles a certificate could make a revocation in it go unread by
-    /// damaging a subpacket there.
+    /// altering them.
     pub(crate) fn from_packet_unhonored(packet: &Packet<'_>) -> Result<Signature, PacketError> {
         Signature::read_packet(packet, Unhonored::Overlook)
     }
@@ -282,8 +286,13 @@ impl Signature {
                 fields.take(usize::from(size))?.to_vec()
             }
         };
-        let material = read_material(&mut fields, public_key_algorithm, version)?;
-        fields.finish()?;
+        let material = read_material(&mut fields, public_key_algorithm, version, unhonored)?;
+        match unhonored {
+            Unhonored::Refuse => fields.finish()?,
+            Unhonored::Overlook => {
+                fields.rest();
+            }
+        }
         let length = fields.offset().saturating_sub(at);
 
         Ok(Signature {
@@ -471,7 +480,10 @@ impl Signature {
 /// what the signature grants, where irongall cannot honor it: a hashed
 /// subpacket marked critical whose meaning irongall does not implement (RFC
 /// 9580 §5.2.3.7), a malformed subpacket of a type it decodes, an embedded
-/// signature that does not read, or an unhashed area that does not.
+/// signature that does not read, or an unhashed area that does not; and with
+/// a part no signature covers that is not written as RFC 9580 requires:
+/// octets after the material, or an integer of the material whose length is
+/// not (§3.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Unhonored {
     /// Refuses the signature.
@@ -502,22 +514,29 @@ fn area<'a>(fields: &mut Fields<'a>, version: Version) -> Result<Fields<'a>, Pac
 
 /// Reads the algorithm-specific material of a signature (RFC 9580 §5.2.3.1 to
 /// §5.2.3.5), up to the end of `fields`.
-fn read_material(
-    fields: &mut Fields<'_>,
+///
+/// Where `unhonored` says to overlook what irongall cannot honor, an integer
+/// is read for its value alone, however its length is written: see
+/// [`Fields::mpi_value`].
+fn read_material<'a>(
+    fields: &mut Fields<'a>,
     algorithm: PublicKeyAlgorithm,
     version: Version,
+    unhonored: Unhonored,
 ) -> Result<SignatureMaterial, PacketError> {
+    let mpi = |fields: &mut Fields<'a>| match unhonored {
+        Unhonored::Refuse => fields.mpi(version),
+        Unhonored::Overlook => fields.mpi_value(),
+    };
     match algorithm {
         PublicKeyAlgorithm::RSA
         | PublicKeyAlgorithm::RSA_ENCRYPT_ONLY
-        | PublicKeyAlgorithm::RSA_SIGN_ONLY => {
-            Ok(SignatureMaterial::Rsa(fields.mpi(version)?.to_vec()))
-        }
+        | PublicKeyAlgorithm::RSA_SIGN_ONLY => Ok(SignatureMaterial::Rsa(mpi(fields)?.to_vec())),
         PublicKeyAlgorithm::ED25519 => Ok(SignatureMaterial::Ed25519(fields.array()?)),
         // RFC 9580 §5.2.3.3.1 forbids EdDSALegacy in version 6.
         PublicKeyAlgorithm::EDDSA_LEGACY if version == Version::V4 => {
-            let r = fields.mpi(version)?;
-            let s = fields.mpi(version)?;
+            let r = mpi(fields)?;
+            let s = mpi(fields)?;
             Ok(ed25519_legacy(r, s).map_or(SignatureMaterial::Opaque, SignatureMaterial::Ed25519))
         }
         _ => {

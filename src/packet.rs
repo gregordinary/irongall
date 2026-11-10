@@ -387,8 +387,7 @@ impl<'a> Fields<'a> {
     /// implementations did, and the leading zeros are dropped.
     pub(crate) fn mpi(&mut self, version: Version) -> Result<&'a [u8], PacketError> {
         let start = self.offset;
-        let bits = self.u16()?;
-        let bytes = self.take(usize::from(bits).div_ceil(8))?;
+        let (bits, bytes) = self.mpi_fields()?;
         let Some(&first) = bytes.first() else {
             return Ok(bytes);
         };
@@ -402,12 +401,38 @@ impl<'a> Fields<'a> {
         if !unused_are_zero || (version == Version::V6 && !exact) {
             return Err(self.error_at(PacketErrorKind::InvalidMpi, start));
         }
-        let significant = bytes
-            .iter()
-            .position(|&byte| byte != 0)
-            .unwrap_or(bytes.len());
-        Ok(bytes.get(significant..).unwrap_or_default())
+        Ok(without_leading_zeros(bytes))
     }
+
+    /// Takes a multiprecision integer as [`mpi`](Self::mpi) does, but reads
+    /// its length only for the number of octets it spans: the value is those
+    /// octets without leading zeros, whether or not the length counts every
+    /// bit they set, and whether or not it is exact.
+    ///
+    /// For material whose value is all that matters, read where how it is
+    /// encoded may have been altered: a signature's integers are covered by
+    /// no signature, and their lengths do not change the equation.
+    pub(crate) fn mpi_value(&mut self) -> Result<&'a [u8], PacketError> {
+        let (_, bytes) = self.mpi_fields()?;
+        Ok(without_leading_zeros(bytes))
+    }
+
+    /// Takes a multiprecision integer's fields: its length in bits, and the
+    /// octets the length spans.
+    fn mpi_fields(&mut self) -> Result<(u16, &'a [u8]), PacketError> {
+        let bits = self.u16()?;
+        let bytes = self.take(usize::from(bits).div_ceil(8))?;
+        Ok((bits, bytes))
+    }
+}
+
+/// `bytes`, a big-endian integer, without its leading zero octets.
+fn without_leading_zeros(bytes: &[u8]) -> &[u8] {
+    let significant = bytes
+        .iter()
+        .position(|&byte| byte != 0)
+        .unwrap_or(bytes.len());
+    bytes.get(significant..).unwrap_or_default()
 }
 
 /// A failure reading packets: what was wrong, in which packet, and where.
@@ -776,6 +801,36 @@ mod tests {
         assert_eq!(
             read(&[0x00, 0x08, 0x00], Version::V6).unwrap_err().kind(),
             PacketErrorKind::InvalidMpi
+        );
+
+        // Read for its value alone, an integer's length says only how many
+        // octets it spans: each of the encodings above is read, and a length
+        // that runs past the input is still refused.
+        let value = |bytes: &[u8]| {
+            let packet = Packet {
+                tag: Tag::SIGNATURE,
+                body: bytes,
+                offset: 0,
+                body_offset: 10,
+            };
+            let mut fields = packet.fields();
+            let value = fields.mpi_value().map(<[u8]>::to_vec);
+            value.map(|value| (value, fields.rest().len()))
+        };
+        for (bytes, expected) in [
+            (&[0x00, 0x01, 0x03][..], [0x03].to_vec()),
+            (&[0x00, 0x02, 0x01], [0x01].to_vec()),
+            (&[0x00, 0x10, 0x00, 0x01], [0x01].to_vec()),
+            (&[0x00, 0x08, 0x00], Vec::new()),
+            (&[0x00, 0x09, 0x01, 0xFF, 0xAA], [0x01, 0xFF].to_vec()),
+        ] {
+            assert_eq!(value(bytes).unwrap().0, expected, "{bytes:02X?}");
+        }
+        assert_eq!(value(&[0x00, 0x09, 0x01, 0xFF, 0xAA]).unwrap().1, 1);
+        let error = value(&[0x00, 0x09, 0x01]).unwrap_err();
+        assert_eq!(
+            (error.kind(), error.offset()),
+            (PacketErrorKind::TruncatedBody, 12)
         );
     }
 }

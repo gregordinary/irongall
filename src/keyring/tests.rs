@@ -2,6 +2,8 @@
 //! with, which refusal is reported, a document hashed in pieces, and the
 //! documents and certificates GnuPG made, judged under the default policy.
 
+use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -9,7 +11,7 @@ use super::{Keyring, Refusal};
 use crate::cert::{self, Certificate};
 use crate::document;
 use crate::key::Fingerprint;
-use crate::packet::Version;
+use crate::packet::{self, Tag, Version};
 use crate::policy::{Authority, Policy, Reason};
 use crate::signature::{Signature, SignatureType, SubpacketType};
 use crate::test_support::forge::{self, Key};
@@ -213,7 +215,7 @@ fn a_signature_naming_a_key_irongall_does_not_verify_with() {
         Key::ed25519(1, Version::V4, CREATED),
         Key::ed25519(2, Version::V4, CREATED),
     );
-    let rsa = Key::rsa(CREATED);
+    let rsa = Key::rsa(Version::V4, CREATED);
     // A DSA key, and an RSA key of 1024 bits, each signing as a key the tests
     // hold does, so that only the key stands in the way.
     let dsa = [
@@ -719,4 +721,106 @@ fn gnupg_documents() {
         .verify(&policy, within, before_expiry.signatures(), &document)
         .unwrap();
     assert_eq!(verified.key(), expired.primary());
+}
+
+/// `name`'s certificate with each Signature packet of `signature_type`
+/// changed by `change`, and every packet framed as the test forge frames
+/// one, or `None` if `change` changes none.
+fn gnupg_changed(
+    name: &str,
+    signature_type: SignatureType,
+    change: &dyn Fn(&[u8]) -> Option<Vec<u8>>,
+) -> Option<Certificate> {
+    let data = vector_bytes(&alloc::format!("gnupg/{name}.pgp"));
+    let mut changed = 0;
+    let mut framed = Vec::new();
+    for packet in packet::packets(&data) {
+        let packet = packet.unwrap();
+        let mut reframed = forge::packet(packet.tag(), packet.body());
+        if packet.tag() == Tag::SIGNATURE
+            && forge::read(&reframed).signature_type() == signature_type
+        {
+            reframed = change(&reframed)?;
+            changed += 1;
+        }
+        framed.extend(reframed);
+    }
+    assert_eq!(changed, 1, "{name}");
+    Some(cert::certificates(&framed).next().unwrap().unwrap())
+}
+
+/// GnuPG's revocations still revoke when changed where no signature covers
+/// them, as anyone who handles a certificate can change them: with the
+/// hash prefix inverted, with an octet after the material, or with the
+/// integers of the material written another way. GnuPG 2.4.4 lists each
+/// certificate with the first two changes as revoked (`pub:r`, `sub:r`),
+/// and the signature its revoked subkey made is still refused.
+#[test]
+fn gnupg_revocations_changed_where_nothing_covers_them_still_revoke() {
+    type Change = Box<dyn Fn(&[u8]) -> Option<Vec<u8>>>;
+    let mut changes: Vec<(String, Change)> = vec![
+        (
+            "prefix".into(),
+            Box::new(|packet: &[u8]| Some(forge::with_prefix_inverted(packet))),
+        ),
+        (
+            "appended".into(),
+            Box::new(|packet: &[u8]| Some(forge::with_appended(packet, &[0x00]))),
+        ),
+    ];
+    for encoding in forge::Encoding::ALL {
+        changes.push((
+            alloc::format!("{encoding:?}"),
+            Box::new(move |packet: &[u8]| forge::with_integers(packet, encoding)),
+        ));
+    }
+    let standings = |certificate: &Certificate| -> Vec<_> {
+        Authority::new(certificate, &Policy::new(), MARCH_2026)
+            .signers()
+            .map(|(_, standing)| standing.map(|window| (window.created(), window.expires())))
+            .collect()
+    };
+    let document = vector_bytes("gnupg/document.txt");
+    let by_subkey = document::detached(&vector_bytes("gnupg/revoked-subkey.sig")).unwrap();
+    let mut tried = 0;
+    for (how, change) in &changes {
+        if let Some(revoked) = gnupg_changed(
+            "revoked-sha1",
+            SignatureType::KEY_REVOCATION,
+            change.as_ref(),
+        ) {
+            assert!(
+                standings(&revoked)
+                    .iter()
+                    .all(|standing| *standing == Err(Reason::CertificateRevoked)),
+                "{how}"
+            );
+            tried += 1;
+        }
+        if let Some(short) = gnupg_changed(
+            "short-hash",
+            SignatureType::SUBKEY_REVOCATION,
+            change.as_ref(),
+        ) {
+            assert_eq!(
+                standings(&short),
+                [Ok((1_770_681_600, None)), Err(Reason::SubkeyRevoked)],
+                "{how}"
+            );
+            let refusal = Keyring::new([short])
+                .verify(
+                    &Policy::new(),
+                    MARCH_2026,
+                    by_subkey.signatures(),
+                    &document,
+                )
+                .unwrap_err();
+            assert_eq!(refusal.reason(), Reason::SubkeyRevoked, "{how}");
+            tried += 1;
+        }
+    }
+    // Every change, to both revocations, but for a length one bit longer
+    // than an integer within its octets: the high bit of the first octet of
+    // both of the subkey revocation's integers is set.
+    assert_eq!(tried, 9);
 }

@@ -72,6 +72,15 @@
 //!   passed over, anyone who handles a certificate could make a revocation
 //!   go unread by damaging a subpacket in its unhashed area, which no
 //!   signature covers.
+//! - **What no signature covers** does not decide whether a certificate's
+//!   statement restricts: its hash prefix, octets after its material, and
+//!   the lengths written for its material's integers. A statement whose
+//!   prefix is not its hash's, whose packet holds octets after its
+//!   material, or whose integers' lengths are not written as §3.2 requires
+//!   grants nothing and still restricts, as one refused for a malformed
+//!   subpacket does. §5.2.3.6 and §3.2 require such a version 6 signature to
+//!   be rejected: irongall rejects it as a signature over a document, and
+//!   weighs it as a certificate's statement only where it restricts.
 //! - **`Hash` armor headers** must be well formed, and their names are not
 //!   checked against the signatures, as §6.2.2.3 requires. GnuPG checks
 //!   them.

@@ -325,9 +325,25 @@ impl Signature {
     /// Checks the hash the signature is made over against the two octets of
     /// it the signature carries, and then against the signature itself.
     fn check_digest(&self, check: Check<'_>, digest: &Digest) -> Result<(), VerifyError> {
-        if digest.as_bytes().get(..2) != Some(&self.hash_prefix[..]) {
+        if self.prefix_of(digest) == Prefix::Differs {
             return Err(VerifyError::HashPrefixMismatch);
         }
+        self.check_equation(check, digest)
+    }
+
+    /// Whether the two octets of its hash the signature carries are the
+    /// first two of `digest`.
+    fn prefix_of(&self, digest: &Digest) -> Prefix {
+        if digest.as_bytes().get(..2) == Some(&self.hash_prefix[..]) {
+            Prefix::Matches
+        } else {
+            Prefix::Differs
+        }
+    }
+
+    /// Checks the signature itself against the hash it is made over, by the
+    /// public-key operation, whatever two octets of the hash it carries.
+    fn check_equation(&self, check: Check<'_>, digest: &Digest) -> Result<(), VerifyError> {
         #[cfg(test)]
         crate::test_support::work::operation();
         match check {
@@ -472,17 +488,33 @@ impl Over<'_> {
     }
 }
 
+/// Whether the two octets of its hash a signature carries, its hash prefix,
+/// are those of the hash it is checked over.
+///
+/// The prefix lets a verifier rule out a signature over other data without
+/// its public-key operation, and is covered by no signature. RFC 9580
+/// §5.2.3.6 requires a version 6 signature whose prefix does not match to be
+/// rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prefix {
+    /// They are.
+    Matches,
+    /// They are not.
+    Differs,
+}
+
 /// A certificate's primary key, checked as the maker of the certificate's
 /// statements, one after another.
 ///
-/// This answers what [`Signature::verify`] answers, for a subject that
-/// begins with the primary key, through the same checks and the same
-/// framing, but for the floor on an Ed25519 signature's hash (see
-/// [`made_by`](Self::made_by)). It is kept apart because judging a
-/// certificate may check one statement over several of its parts, and every
-/// statement over each part: a version 4 signature hashes nothing before the
-/// primary key, so the key is hashed here once for each hash algorithm, and
-/// each check hashes only what follows it.
+/// This answers what [`Signature::verify`] answers, for a subject that begins
+/// with the primary key, through the same checks and the same framing, but
+/// for the floor on an Ed25519 signature's hash (see
+/// [`made_by`](Self::made_by)), and, through
+/// [`made_by_equation`](Self::made_by_equation), for the hash prefix. It is
+/// kept apart because judging a certificate may check one statement over
+/// several of its parts, and every statement over each part: a version 4
+/// signature hashes nothing before the primary key, so the key is hashed here
+/// once for each hash algorithm, and each check hashes only what follows it.
 #[derive(Debug)]
 pub(crate) struct PrimaryChecks<'k> {
     primary: &'k PublicKey,
@@ -519,11 +551,51 @@ impl<'k> PrimaryChecks<'k> {
     /// hash too short for its algorithm still restricts what the certificate
     /// grants, and grants nothing, which the policy decides apart through
     /// [`Signature::hash_too_short`].
+    ///
+    /// As in [`Signature::verify`], a signature whose hash prefix is not
+    /// that of the hash over `over` is refused without its equation, which
+    /// is what keeps trying a signature over every part it may be over
+    /// affordable. [`made_by_equation`](Self::made_by_equation) checks the
+    /// equation whatever the prefix.
     pub(crate) fn made_by(
         &mut self,
         signature: &Signature,
         over: Over<'_>,
     ) -> Result<(), VerifyError> {
+        let (check, digest) = self.digest(signature, over)?;
+        signature.check_digest(check, &digest)
+    }
+
+    /// Checks that the primary key made `signature` over `over`, as
+    /// [`made_by`](Self::made_by) does, by the equation alone, whatever two
+    /// octets of the hash the signature carries, and says whether they are
+    /// that hash's.
+    ///
+    /// No signature covers the prefix, so anyone who handles a certificate
+    /// can change it, and a statement whose equation holds is its key's
+    /// whatever its prefix says. This is the check of a statement over the
+    /// part it is placed with, of which there is one for each statement.
+    pub(crate) fn made_by_equation(
+        &mut self,
+        signature: &Signature,
+        over: Over<'_>,
+    ) -> Result<Prefix, VerifyError> {
+        let (check, digest) = self.digest(signature, over)?;
+        signature.check_equation(check, &digest)?;
+        Ok(signature.prefix_of(&digest))
+    }
+
+    /// The check of `signature` with the primary key, and the hash it would
+    /// be made over were it over `over`, once the primary key may have made
+    /// it over a part of that kind.
+    fn digest<'s>(
+        &mut self,
+        signature: &'s Signature,
+        over: Over<'_>,
+    ) -> Result<(Check<'s>, Digest), VerifyError>
+    where
+        'k: 's,
+    {
         signature.check_subject(over.kind())?;
         let check = signature.check_key(self.primary)?;
         let mut context = match signature.version {
@@ -539,7 +611,7 @@ impl<'k> PrimaryChecks<'k> {
             Over::UserId(user_id) => hash_user_id(&mut context, user_id)?,
             Over::Subkey(subkey) => signature.hash_key(&mut context, subkey)?,
         }
-        signature.check_digests(check, &signature.finish(&context, None))
+        Ok((check, signature.trailed(context)))
     }
 
     /// How many octets [`made_by`](Self::made_by) hashes checking

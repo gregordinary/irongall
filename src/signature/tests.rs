@@ -6,17 +6,25 @@ use super::{RevocationCode, Signature, SignatureMaterial, SignatureType, Subpack
 use crate::armor;
 use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyId, PublicKeyAlgorithm};
-use crate::packet::{PacketError, PacketErrorKind, Tag, Version, packets};
+use crate::packet::{Packet, PacketError, PacketErrorKind, Tag, Version, packets};
 use crate::test_support::hex;
 use crate::test_support::rfc9580::{A2_SIGNATURE, A2_SIGNATURE_PACKET, A3_CERTIFICATE};
 
 /// Reads `body` as the body of a Signature packet whose header is six octets
 /// long, so that the body's fields begin at offset 6.
 fn parse(body: &[u8]) -> Result<Signature, PacketError> {
+    parse_with(body, Signature::from_packet)
+}
+
+/// [`parse`], reading with `read`.
+fn parse_with(
+    body: &[u8],
+    read: fn(&Packet<'_>) -> Result<Signature, PacketError>,
+) -> Result<Signature, PacketError> {
     let length = u32::try_from(body.len()).unwrap().to_be_bytes();
     let input = [&[0xC2, 0xFF][..], &length, body].concat();
     let packet = packets(&input).next().unwrap().unwrap();
-    Signature::from_packet(&packet)
+    read(&packet)
 }
 
 fn failure(body: &[u8]) -> (PacketErrorKind, usize) {
@@ -558,6 +566,67 @@ fn material() {
         );
     }
     assert_eq!(read(4, 17, &[]).unwrap(), SignatureMaterial::Opaque);
+}
+
+/// How a part of a signature that no signature covers is written refuses
+/// the signature where it is read to be honored, and not where it is read
+/// only to weigh what it restricts, which reads the same values: octets
+/// after the material, which the packet's length counts, and an integer
+/// whose length leaves a bit its value sets uncounted, in either version, or
+/// is not exact, in version 6.
+#[test]
+fn how_an_uncovered_part_is_written_refuses_only_an_honored_reading() {
+    let both = |body: &[u8]| {
+        (
+            parse(body),
+            parse_with(body, Signature::from_packet_unhonored).unwrap(),
+        )
+    };
+    // Octets after the material, counted in the signature's length.
+    for (version, at) in [(4, 86), (6, 107)] {
+        for appended in [&[0x00][..], &[0x11; 64]] {
+            let material = [&[0x11; 64][..], appended].concat();
+            let body = body(version, 0, 27, 8, &created(), &[], &material);
+            let (honored, unhonored) = both(&body);
+            let error = honored.unwrap_err();
+            assert_eq!(
+                (error.kind(), error.offset()),
+                (PacketErrorKind::TrailingData, at)
+            );
+            assert_eq!(
+                unhonored.material(),
+                &SignatureMaterial::Ed25519([0x11; 64])
+            );
+            assert_eq!(unhonored.length(), body.len());
+        }
+    }
+    // An RSA value of eight bits, 0xC5, written with a length that leaves its
+    // top bit uncounted, with one that counts a leading zero octet, and
+    // with one a bit longer than the value.
+    for (version, material, refused) in [
+        (4, &[0x00, 0x07, 0xC5][..], true),
+        (6, &[0x00, 0x07, 0xC5], true),
+        (4, &[0x00, 0x10, 0x00, 0xC5], false),
+        (6, &[0x00, 0x10, 0x00, 0xC5], true),
+        (4, &[0x00, 0x09, 0x00, 0xC5], false),
+        (6, &[0x00, 0x09, 0x00, 0xC5], true),
+    ] {
+        let (honored, unhonored) = both(&body(version, 0, 1, 8, &created(), &[], material));
+        assert_eq!(
+            honored.map_err(|error| error.kind()).err(),
+            refused.then_some(PacketErrorKind::InvalidMpi),
+            "{version} {material:02X?}"
+        );
+        assert_eq!(unhonored.material(), &SignatureMaterial::Rsa(vec![0xC5]));
+    }
+    // EdDSALegacy's R, of 32 octets, with its top bit uncounted.
+    let r = [&[0xC0][..], &[0x22; 31]].concat();
+    let legacy = [&[0x00, 0xFF][..], &r, &[0x00, 0xFE], &[0x33; 32]].concat();
+    let (honored, unhonored) = both(&body(4, 0, 22, 8, &created(), &[], &legacy));
+    assert_eq!(honored.unwrap_err().kind(), PacketErrorKind::InvalidMpi);
+    let mut native = [0x33; 64];
+    native[..32].copy_from_slice(&r);
+    assert_eq!(unhonored.material(), &SignatureMaterial::Ed25519(native));
 }
 
 #[test]

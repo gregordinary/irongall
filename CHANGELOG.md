@@ -37,6 +37,15 @@ public API changes, since a verifier's verdicts are part of its contract.
   since the binding does not cover that expiration. Earlier releases
   applied it. Back-signatures in the hashed area, and those GnuPG and RNP
   make, which state no expiration, are judged as before.
+- A certificate's statement that verifies restricts what the certificate
+  grants whatever the parts of its packet that no signature covers hold:
+  its hash prefix, octets after its material, and the lengths written for
+  its material's integers. A statement whose prefix is not its hash's,
+  whose packet holds octets after its material, or whose integers' lengths
+  are not written as RFC 9580 requires grants nothing. Earlier releases
+  passed over such a statement, so an unsigned change to the certificate
+  could make it grant what a revocation or a newer self-signature
+  withdrew.
 
 ### Changed
 

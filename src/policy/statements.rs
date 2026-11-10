@@ -10,13 +10,27 @@
 //! it over. A statement found nowhere restricts nothing, so each one that
 //! does not verify where it is placed is tried over every other part it may
 //! be over. See [`Statements::of`] for what that search may cost.
+//!
+//! Nor does a signature's hash prefix decide where it is found, since no
+//! signature covers it either. Over the part it is placed with, a statement
+//! is checked by its equation whatever its prefix, and one whose prefix
+//! differs is kept as a statement irongall does not honor: it restricts,
+//! and grants nothing. The search over other parts compares the prefix
+//! first, since an equation for every signature over every part would cost
+//! the product of the two. So a statement both moved from the part it is
+//! over and given a prefix that matches no part is not found, as though it
+//! had been removed, which whoever supplies a certificate can always do.
+//! What the placement check closes is a statement left where it belongs,
+//! where another reader still finds and honors it: GnuPG 2.4.4 honors a
+//! version 4 revocation whose prefix differs and exports it as it is, and on
+//! import places a misplaced subkey revocation back after its subkey.
 
 use alloc::vec;
 use alloc::vec::Vec;
 
 use super::Policy;
 use crate::cert::Certificate;
-use crate::signature::{Over, PrimaryChecks, Signature, SignatureType, VerifyError};
+use crate::signature::{Over, Prefix, PrimaryChecks, Signature, SignatureType, VerifyError};
 
 /// How many octets judging a certificate may hash searching for the parts
 /// its signatures are over, for each octet of its signatures.
@@ -69,18 +83,20 @@ impl<'a> Statements<'a> {
     /// Attributes `certificate`'s statements, judging its subkeys under
     /// `policy`.
     ///
-    /// Each signature is verified first over the part it is placed with: a
-    /// certification revocation that follows a user ID over the user ID and
-    /// over the primary key alone, since it may withdraw either's
-    /// self-signature. Those that do not verify there, and the
-    /// certifications, bindings, and subkey revocations placed with no part,
-    /// are then tried over every other part of the kind their type is over,
-    /// until one verifies: a certification or a certification revocation
-    /// over each user ID, and a subkey binding or revocation over each
-    /// subkey the policy accepts. A statement over a subkey the policy
-    /// refuses restricts nothing, since the subkey grants nothing, and each
-    /// signature over a subkey is hashed over the whole of it, which for a
-    /// key irongall does not read may be as long as its packet.
+    /// Each signature is verified first over the part it is placed with, by
+    /// its equation whatever its hash prefix, and is honored there only if it
+    /// is honored and its prefix matches too: a certification revocation that
+    /// follows a user ID over the user ID and over the primary key alone,
+    /// since it may withdraw either's self-signature. Those that do not
+    /// verify there, and the certifications, bindings, and subkey revocations
+    /// placed with no part, are then tried over every other part of the kind
+    /// their type is over, until one verifies, its prefix compared first: a
+    /// certification or a certification revocation over each user ID, and a
+    /// subkey binding or revocation over each subkey the policy accepts. A
+    /// statement over a subkey the policy refuses restricts nothing, since
+    /// the subkey grants nothing, and each signature over a subkey is hashed
+    /// over the whole of it, which for a key irongall does not read may be as
+    /// long as its packet.
     ///
     /// Which key made a statement is its equation's to say, without the
     /// floor RFC 9580 sets on an Ed25519 signature's hash, so a statement
@@ -127,22 +143,28 @@ impl<'a> Statements<'a> {
             certificate.unhonored_primary_signatures(),
         );
         for statement in held(honored, unhonored) {
-            if checks.made_by(statement.0, Over::Key).is_ok() {
-                statements.key.push(statement);
-            } else if statement.0.signature_type() == SignatureType::CERTIFICATION_REVOCATION {
-                displaced.push((statement, Some(Part::Key)));
+            match checks.made_by_equation(statement.0, Over::Key) {
+                Ok(prefix) => statements.key.push(placed(statement, prefix)),
+                Err(_)
+                    if statement.0.signature_type() == SignatureType::CERTIFICATION_REVOCATION =>
+                {
+                    displaced.push((statement, Some(Part::Key)));
+                }
+                Err(_) => {}
             }
         }
         for (index, user_id) in certificate.user_ids().iter().enumerate() {
             let over = Over::UserId(user_id.value());
             for statement in held(user_id.signatures(), user_id.unhonored_signatures()) {
                 let signature = statement.0;
-                if checks.made_by(signature, over).is_ok() {
-                    statements.push(Part::UserId(index), statement);
-                } else if signature.signature_type() == SignatureType::CERTIFICATION_REVOCATION
-                    && checks.made_by(signature, Over::Key).is_ok()
+                let withdraws =
+                    signature.signature_type() == SignatureType::CERTIFICATION_REVOCATION;
+                if let Ok(prefix) = checks.made_by_equation(signature, over) {
+                    statements.push(Part::UserId(index), placed(statement, prefix));
+                } else if let Some(Ok(prefix)) =
+                    withdraws.then(|| checks.made_by_equation(signature, Over::Key))
                 {
-                    statements.key.push(statement);
+                    statements.key.push(placed(statement, prefix));
                 } else {
                     displaced.push((statement, Some(Part::UserId(index))));
                 }
@@ -150,15 +172,13 @@ impl<'a> Statements<'a> {
         }
         for (index, subkey) in certificate.subkeys().iter().enumerate() {
             let accepted = statements.subkeys.get(index).is_some_and(Option::is_some);
+            let over = Over::Subkey(subkey.key());
             for statement in held(subkey.signatures(), subkey.unhonored_signatures()) {
-                if accepted
-                    && checks
-                        .made_by(statement.0, Over::Subkey(subkey.key()))
-                        .is_ok()
-                {
-                    statements.push(Part::Subkey(index), statement);
-                } else {
-                    displaced.push((statement, accepted.then_some(Part::Subkey(index))));
+                match accepted.then(|| checks.made_by_equation(statement.0, over)) {
+                    Some(Ok(prefix)) => {
+                        statements.push(Part::Subkey(index), placed(statement, prefix));
+                    }
+                    _ => displaced.push((statement, accepted.then_some(Part::Subkey(index)))),
                 }
             }
         }
@@ -265,6 +285,17 @@ impl<'a> Search<'a> {
         }
         Some(())
     }
+}
+
+/// `statement`, found by its equation over the part it is placed with,
+/// honored only if the hash prefix it carries is its hash's as well.
+///
+/// One whose prefix differs has been altered where nothing covers it, or was
+/// made so, and RFC 9580 §5.2.3.6 requires a version 6 one to be rejected:
+/// irongall does not honor it. Its equation holds, so its key made it, and
+/// as a statement irongall does not honor it still restricts.
+fn placed((signature, honored): Statement<'_>, prefix: Prefix) -> Statement<'_> {
+    (signature, honored && prefix == Prefix::Matches)
 }
 
 /// Each of `honored` paired with `true`, then each of `unhonored` with

@@ -158,9 +158,16 @@
 //!   GnuPG, and a self-signature or binding that governs refuses its
 //!   certificate or subkey.
 //! - **MD5 and RIPEMD-160** are not implemented, so a signature over either
-//!   verifies nothing, and a certificate's revocation made over either is
-//!   passed over: which key made it cannot be established. RFC 9580 forbids
-//!   making a signature over either (§9.5).
+//!   verifies nothing, and a certificate's statement made over either is
+//!   passed over, since which key made it cannot be established: a
+//!   revocation revokes nothing, a certification revocation withdraws
+//!   nothing, and a newer self-signature or binding does not keep an older
+//!   one from governing. RFC 9580 forbids making a signature over either
+//!   (§9.5).
+//! - **Version 3 signatures** are not read, though §5.2 lets a reader
+//!   accept them, so a certificate's statement of version 3 is passed over
+//!   as one over MD5 is. RFC 9580 forbids making them, by a version 4 key
+//!   included (Table 27).
 //! - **Postdated signatures**, dated later than the time of judgement and
 //!   the policy's [clock skew](policy::Policy::clock_skew), are refused.
 //!   GnuPG accepts them.

@@ -146,7 +146,10 @@ and a case in `divergences.rs` that produces it.
   rather than pass over what it did not reach. The unit tests count the
   octets hashed and the public-key operations performed
   (`test_support::work`), so a bound is held by a test rather than a
-  timing.
+  timing. Memory is linear in the input as well, and SECURITY.md states
+  its largest factor: a signature holds each subpacket apart, so an area
+  packed with the smallest subpackets is held in about 17 times its size.
+  A change that raises the factor changes that statement.
 - **No constant-time code, and no claim of it.** Everything a verification
   computes over is public: the key, the signature, and the signed data. That
   is what makes hand-written cryptography reasonable here, and it leaves

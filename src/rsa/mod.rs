@@ -29,6 +29,13 @@
 //! can admit a forgery, as Bleichenbacher's 2006 attack on lenient parsers
 //! did.
 //!
+//! The signature is read as an integer, as OpenPGP carries it, whose leading
+//! zero octets are not significant: it verifies whether or not it is written
+//! with them, and so does one shorter than the modulus. RFC 8017 §8.2.2
+//! refuses a signature whose length in octets is not the modulus's, so a
+//! format that holds a signature to that length, or that names a signature
+//! by its octets, checks the length before verifying.
+//!
 //! The key is bounded on both sides. RFC 9580 §12.4 forbids verifying with a
 //! modulus narrower than 2048 bits. The work of one verification grows with
 //! the square of the modulus's width and linearly with the exponent's, and an

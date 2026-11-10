@@ -46,7 +46,12 @@
 //! needs more grants nothing ([`Reason::UnattributedSignatures`]), since a
 //! statement the search did not reach might restrict it. Certifications by
 //! other keys stay within the bound unless the certificate has scores of
-//! user IDs and almost nothing but such certifications.
+//! user IDs and almost nothing but such certifications. A user ID needs no
+//! signature, though, so anyone who handles a certificate can add user IDs
+//! until it needs more, and it then grants nothing, alone or combined with
+//! another copy of itself. GnuPG drops a user ID that carries no
+//! self-signature when it imports a certificate, so a certificate exported
+//! from a GnuPG keyring holds none.
 //!
 //! - A certificate grants nothing if its primary key has revoked itself, for
 //!   whatever reason and from whatever time, or if the policy does not accept
@@ -96,11 +101,12 @@
 //! A signature counts as made by the given time if it is dated no later
 //! than the policy's [clock skew](Policy::clock_skew) after it.
 //!
-//! Every rule above fails closed: a statement that restricts what a
-//! certificate grants is never passed over for a reason of irongall's own
-//! where passing over it would lift the restriction. So the policy's hash
-//! algorithms apply to the bindings and back-signatures that grant a subkey
-//! its authority, where refusing one refuses the subkey, and to the
+//! Every rule above fails closed: a statement found as above that restricts
+//! what a certificate grants is never passed over for a reason of irongall's
+//! own where passing over it would lift the restriction. The statements
+//! irongall cannot attribute to any key are set out below. So the policy's
+//! hash algorithms apply to the bindings and back-signatures that grant a
+//! subkey its authority, where refusing one refuses the subkey, and to the
 //! self-signatures over the primary key and the certification revocations
 //! that withdraw them, where refusing one that governs or withdraws refuses
 //! the certificate rather than let an older self-signature, perhaps with a
@@ -127,8 +133,12 @@
 //! certificate or subkey.
 //!
 //! A statement over a hash irongall does not implement, MD5 or RIPEMD-160,
-//! cannot be attributed to any key, so it is passed over, a revocation
-//! included. RFC 9580 forbids making a signature over either (§9.5).
+//! or of a version irongall does not read, version 3, cannot be attributed
+//! to any key, so it is passed over whatever it states: a revocation
+//! revokes nothing, a certification revocation withdraws nothing, and a
+//! newer self-signature or binding does not keep an older one from
+//! governing. RFC 9580 forbids making a signature over either hash (§9.5),
+//! and making a version 3 signature (§5.2).
 //!
 //! A self-signature over the primary key made before 1 February 2023, and a
 //! certification revocation made before then, are the exception: each
@@ -662,8 +672,9 @@ impl<'a> Authority<'a> {
     /// copy from a keyserver, can therefore make judging it cost time in
     /// proportion to its size: on the order of a second or two for each
     /// megabyte of such signatures, under an RSA-2048 or Ed25519 primary
-    /// key, and more under a wider RSA key.
-    /// [`Keyring::verify`](crate::keyring::Keyring::verify) judges a
+    /// key, and more under a wider RSA key. It can also hold user IDs added
+    /// without a signature until the search exceeds its bound, and grant
+    /// nothing. [`Keyring::verify`](crate::keyring::Keyring::verify) judges a
     /// certificate only once one of its keys has made a signature on the
     /// document.
     pub fn new(certificate: &'a Certificate, policy: &Policy, now: u64) -> Authority<'a> {

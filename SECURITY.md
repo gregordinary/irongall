@@ -38,9 +38,13 @@ advisory names the reporter unless you ask otherwise.
   that is not enforced.
 - **Panics and unbounded work on hostile input.** The library is written not
   to panic, to allocate nothing its input does not account for, and to do
-  work linear in its input. A panic, an allocation out of proportion to the
-  input, or time that grows faster than the input is a vulnerability, since a
-  verifier reads input from whoever sends it.
+  work linear in its input. The memory it holds is linear in its input too,
+  by a factor that is largest for signatures: each subpacket is held apart,
+  so a signature whose subpacket areas are packed with the smallest
+  subpackets is held in about 17 times its size, on a 64-bit target. A
+  panic, an allocation beyond that factor, or time that grows faster than
+  the input is a vulnerability, since a verifier reads input from whoever
+  sends it.
 - **An undocumented departure.** irongall reading or judging an input
   differently from RFC 9580 where the Conformance section of the crate
   documentation does not list the difference.

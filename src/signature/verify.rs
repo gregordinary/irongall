@@ -8,7 +8,7 @@ use core::fmt;
 use super::{Signature, SignatureMaterial, SignatureType};
 use crate::ed25519::{self, Ed25519Error};
 use crate::hash::{Context, Digest, HashAlgorithm};
-use crate::key::{self, KeyMaterial, PublicKey, PublicKeyAlgorithm};
+use crate::key::{self, KeyMaterial, PublicKey};
 use crate::packet::Version;
 use crate::rsa::{self, RsaError};
 
@@ -253,13 +253,11 @@ impl Signature {
     /// (RFC 9580 §5.2.3.3 and §5.2.3.4), so one over SHA-1 or SHA2-224 never
     /// verifies, whichever key made it.
     pub(crate) fn hash_too_short(&self) -> bool {
-        matches!(
-            self.public_key_algorithm,
-            PublicKeyAlgorithm::ED25519 | PublicKeyAlgorithm::EDDSA_LEGACY
-        ) && self
-            .hash_algorithm
-            .digest_length()
-            .is_some_and(|length| length < ED25519_MINIMUM_HASH_LENGTH)
+        self.public_key_algorithm.signs_with_ed25519()
+            && self
+                .hash_algorithm
+                .digest_length()
+                .is_some_and(|length| length < ED25519_MINIMUM_HASH_LENGTH)
     }
 
     /// Checks that the signature's hash is one its public-key algorithm may
@@ -753,15 +751,14 @@ impl<'a> VerifyingKey<'a> {
     /// [`VerifyError::UnsupportedAlgorithm`] if irongall does not verify with
     /// the key's algorithm, or the key carries material of another.
     fn of(key: &'a PublicKey) -> Result<VerifyingKey<'a>, VerifyError> {
-        match (key.algorithm(), key.material()) {
-            (
-                PublicKeyAlgorithm::RSA | PublicKeyAlgorithm::RSA_SIGN_ONLY,
-                KeyMaterial::Rsa { modulus, exponent },
-            ) => Ok(VerifyingKey::Rsa { modulus, exponent }),
-            (
-                PublicKeyAlgorithm::ED25519 | PublicKeyAlgorithm::EDDSA_LEGACY,
-                KeyMaterial::Ed25519(key),
-            ) => Ok(VerifyingKey::Ed25519(key)),
+        let algorithm = key.algorithm();
+        match key.material() {
+            KeyMaterial::Rsa { modulus, exponent } if algorithm.signs_with_rsa() => {
+                Ok(VerifyingKey::Rsa { modulus, exponent })
+            }
+            KeyMaterial::Ed25519(key) if algorithm.signs_with_ed25519() => {
+                Ok(VerifyingKey::Ed25519(key))
+            }
             _ => Err(VerifyError::UnsupportedAlgorithm),
         }
     }

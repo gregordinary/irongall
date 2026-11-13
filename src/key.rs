@@ -77,6 +77,38 @@ wire_number! {
     const ED448 = 28, "Ed448";
 }
 
+impl PublicKeyAlgorithm {
+    /// Whether the algorithm is one of RSA's three, whose keys and
+    /// signatures carry the same material: RSA, and its encrypt-only and
+    /// sign-only variants.
+    pub(crate) const fn is_rsa(self) -> bool {
+        matches!(
+            self,
+            PublicKeyAlgorithm::RSA
+                | PublicKeyAlgorithm::RSA_ENCRYPT_ONLY
+                | PublicKeyAlgorithm::RSA_SIGN_ONLY
+        )
+    }
+
+    /// Whether the algorithm signs with RSA: RSA, or its sign-only variant.
+    /// The encrypt-only variant carries RSA material, but does not sign.
+    pub(crate) const fn signs_with_rsa(self) -> bool {
+        matches!(
+            self,
+            PublicKeyAlgorithm::RSA | PublicKeyAlgorithm::RSA_SIGN_ONLY
+        )
+    }
+
+    /// Whether the algorithm signs with Ed25519: Ed25519, or EdDSALegacy,
+    /// whose only curve RFC 9580 defines is Ed25519Legacy (§9.2).
+    pub(crate) const fn signs_with_ed25519(self) -> bool {
+        matches!(
+            self,
+            PublicKeyAlgorithm::ED25519 | PublicKeyAlgorithm::EDDSA_LEGACY
+        )
+    }
+}
+
 /// A key's public material, for the algorithms irongall verifies with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -233,9 +265,7 @@ fn read_material<'a>(
     version: Version,
 ) -> Result<KeyMaterial<'a>, PacketError> {
     match algorithm {
-        PublicKeyAlgorithm::RSA
-        | PublicKeyAlgorithm::RSA_ENCRYPT_ONLY
-        | PublicKeyAlgorithm::RSA_SIGN_ONLY => {
+        rsa if rsa.is_rsa() => {
             let modulus = fields.mpi(version)?;
             let exponent = fields.mpi(version)?;
             Ok(KeyMaterial::Rsa { modulus, exponent })
@@ -721,5 +751,24 @@ mod tests {
             format!("{:?}", PublicKeyAlgorithm(100)),
             "PublicKeyAlgorithm(100: public-key algorithm 100)"
         );
+    }
+
+    /// The families of algorithms, over every octet.
+    #[test]
+    fn algorithm_families() {
+        for number in 0..=u8::MAX {
+            let algorithm = PublicKeyAlgorithm(number);
+            assert_eq!(algorithm.is_rsa(), matches!(number, 1..=3), "{number}");
+            assert_eq!(
+                algorithm.signs_with_rsa(),
+                matches!(number, 1 | 3),
+                "{number}"
+            );
+            assert_eq!(
+                algorithm.signs_with_ed25519(),
+                matches!(number, 22 | 27),
+                "{number}"
+            );
+        }
     }
 }

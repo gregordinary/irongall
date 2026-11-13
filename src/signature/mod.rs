@@ -650,9 +650,7 @@ fn read_material<'a>(
         Unhonored::Overlook => fields.mpi_value(),
     };
     match algorithm {
-        PublicKeyAlgorithm::RSA
-        | PublicKeyAlgorithm::RSA_ENCRYPT_ONLY
-        | PublicKeyAlgorithm::RSA_SIGN_ONLY => Ok(SignatureMaterial::Rsa(mpi(fields)?)),
+        rsa if rsa.is_rsa() => Ok(SignatureMaterial::Rsa(mpi(fields)?)),
         PublicKeyAlgorithm::ED25519 => Ok(SignatureMaterial::Ed25519(fields.array()?)),
         // RFC 9580 §5.2.3.3.1 forbids EdDSALegacy in version 6.
         PublicKeyAlgorithm::EDDSA_LEGACY if version == Version::V4 => {

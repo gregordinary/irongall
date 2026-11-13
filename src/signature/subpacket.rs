@@ -8,7 +8,7 @@ use core::iter::FusedIterator;
 use super::{Signature, Unhonored};
 use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyId};
-use crate::packet::{Fields, PacketError, PacketErrorKind, Version};
+use crate::packet::{Fields, PacketError, PacketErrorKind, Version, two_octet_length};
 use crate::wire::wire_number;
 
 wire_number! {
@@ -469,12 +469,7 @@ fn count_embedded(mut area: Fields<'_>) -> usize {
 fn length(area: &mut Fields<'_>) -> Result<usize, PacketError> {
     Ok(match area.u8()? {
         octet @ 0..=191 => usize::from(octet),
-        // At most 16319, so the addition cannot wrap. `& 0x3F` is `- 192`
-        // over this range.
-        octet @ 192..=254 => {
-            let second = area.u8()?;
-            usize::from(u16::from_be_bytes([octet & 0x3F, second]).wrapping_add(192))
-        }
+        octet @ 192..=254 => usize::from(two_octet_length(octet, area.u8()?)),
         255 => usize::try_from(area.u32()?).unwrap_or(usize::MAX),
     })
 }

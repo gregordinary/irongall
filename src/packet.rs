@@ -111,6 +111,15 @@ impl Tag {
     }
 }
 
+/// The length a two-octet length encodes, a packet's (RFC 9580 §4.2.1.2) or
+/// a subpacket's (§5.2.3.7): `(first - 192) * 256 + second + 192`. Each
+/// format gives a first octet its own range from 192, which the caller has
+/// matched.
+pub(crate) const fn two_octet_length(first: u8, second: u8) -> u16 {
+    // A first octet of 192 to 255 makes at most 16575, so nothing wraps.
+    u16::from_be_bytes([first.wrapping_sub(192), second]).wrapping_add(192)
+}
+
 /// The version of a key or signature packet: the versions irongall reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
@@ -243,10 +252,9 @@ impl<'a> Packets<'a> {
             }
             let length = match header.u8().map_err(|_| truncated(tag))? {
                 octet @ 0..=191 => u32::from(octet),
-                // At most 8383, so the addition cannot wrap.
                 octet @ 192..=223 => {
                     let second = header.u8().map_err(|_| truncated(tag))?;
-                    u32::from(u16::from_be_bytes([octet & 0x1F, second])).wrapping_add(192)
+                    u32::from(two_octet_length(octet, second))
                 }
                 255 => header.u32().map_err(|_| truncated(tag))?,
                 224..=254 => return Err(fail(PacketErrorKind::PartialBodyLength, Some(tag))),
@@ -627,7 +635,7 @@ mod tests {
     use alloc::vec::Vec;
     use alloc::{format, vec};
 
-    use super::{Packet, PacketError, PacketErrorKind, Tag, Version, packets};
+    use super::{Packet, PacketError, PacketErrorKind, Tag, Version, packets, two_octet_length};
 
     /// The first packet of `input`.
     fn first(input: &[u8]) -> Result<Packet<'_>, PacketError> {
@@ -638,6 +646,22 @@ mod tests {
     /// packet, so a length that overreads or underreads shows.
     fn framed(header: &[u8], len: usize) -> Vec<u8> {
         [header, &vec![0x5A; len], &[0xCD, 0x01, 0x21]].concat()
+    }
+
+    /// The two-octet length at the edges of each format's range: a packet's
+    /// first octet runs from 192 to 223, and a subpacket's to 254.
+    #[test]
+    fn two_octet_lengths() {
+        for (first, second, length) in [
+            (192, 0, 192),
+            (192, 255, 447),
+            (193, 0, 448),
+            (223, 255, 8383),
+            (254, 255, 16319),
+            (255, 255, 16575),
+        ] {
+            assert_eq!(two_octet_length(first, second), length);
+        }
     }
 
     #[test]

@@ -92,7 +92,7 @@ pub use subpacket::{
 };
 pub use verify::{DocumentHash, Subject, VerifyError};
 pub(crate) use verify::{
-    Over, Prefix, PrimaryChecks, SubjectKind, check_verifying_key, statement_kinds,
+    Over, Prefix, PrimaryChecks, SubjectKind, Verifier, check_verifying_key, statement_kinds,
 };
 
 use crate::hash::HashAlgorithm;

@@ -316,18 +316,20 @@ impl JsonParser<'_> {
 
 /// The work a computation does, counted on the thread that does it, so that
 /// a test can hold judging and verifying to the bounds they promise rather
-/// than time them: the octets passed to a signature's hash contexts, and the
-/// public-key operations verifying a signature.
+/// than time them: the octets passed to a signature's hash contexts, the
+/// public-key operations verifying a signature, and the keys prepared for
+/// those operations.
 ///
-/// The library records both, in tests only, where it does the work:
-/// `hash::Context::update`, and the check of a signature whose hash prefix
-/// matched.
+/// The library records each, in tests only, where it does the work:
+/// `hash::Context::update`, the check of a signature whose hash prefix
+/// matched, and the preparation of a key to verify with.
 pub(crate) mod work {
     use core::cell::Cell;
 
     std::thread_local! {
         static HASHED: Cell<u64> = const { Cell::new(0) };
         static OPERATIONS: Cell<u64> = const { Cell::new(0) };
+        static PREPARED: Cell<u64> = const { Cell::new(0) };
     }
 
     /// Records `octets` passed to a hash context.
@@ -340,6 +342,11 @@ pub(crate) mod work {
         OPERATIONS.with(|count| count.set(count.get() + 1));
     }
 
+    /// Records a key prepared for verifying.
+    pub(crate) fn prepared() {
+        PREPARED.with(|count| count.set(count.get() + 1));
+    }
+
     /// What a computation cost.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) struct Work {
@@ -347,16 +354,20 @@ pub(crate) mod work {
         pub(crate) hashed: u64,
         /// The public-key operations it performed.
         pub(crate) operations: u64,
+        /// The keys it prepared for those operations.
+        pub(crate) prepared: u64,
     }
 
     /// The result of `compute`, and the work it did.
     pub(crate) fn of<T>(compute: impl FnOnce() -> T) -> (T, Work) {
         HASHED.with(|count| count.set(0));
         OPERATIONS.with(|count| count.set(0));
+        PREPARED.with(|count| count.set(0));
         let result = compute();
         let work = Work {
             hashed: HASHED.with(Cell::get),
             operations: OPERATIONS.with(Cell::get),
+            prepared: PREPARED.with(Cell::get),
         };
         (result, work)
     }

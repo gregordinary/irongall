@@ -448,7 +448,8 @@ fn the_work_of_trying_a_signature_does_not_multiply() {
         work,
         Work {
             hashed: (unnamed.salt().len() + DOCUMENT.len()) as u64,
-            operations: 0
+            operations: 0,
+            prepared: 0,
         }
     );
 }

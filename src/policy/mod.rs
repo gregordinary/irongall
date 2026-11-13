@@ -207,7 +207,7 @@ use crate::cert::{Certificate, Subkey, UserId};
 use crate::hash::HashAlgorithm;
 use crate::key::{KeyMaterial, PublicKey};
 use crate::packet::Version;
-use crate::signature::{self, Signature, SignatureType, Subject, SubpacketType};
+use crate::signature::{self, Signature, SignatureType, Subject, SubpacketType, Verifier};
 use statements::{Statement, Statements};
 
 /// The rules a signature is judged by.
@@ -1204,8 +1204,9 @@ fn subkey_standing(
         return Err(Reason::WeakBinding);
     }
     let mut expires = lapse;
+    let mut subkey = Verifier::new(key);
     for (binding, _) in bindings {
-        let consent = back_signature_lapse(binding, primary, key, &made, policy)?;
+        let consent = back_signature_lapse(binding, primary, &mut subkey, &made, policy)?;
         expires = earliest([
             expires,
             key_expires(key.creation_time(), binding),
@@ -1239,22 +1240,25 @@ fn subkey_standing(
 fn back_signature_lapse(
     binding: &Signature,
     primary: &PublicKey,
-    subkey: &PublicKey,
+    subkey: &mut Verifier<'_>,
     made: &RangeInclusive<u64>,
     policy: &Policy,
 ) -> Result<Option<u64>, Reason> {
-    let subject = Subject::Subkey { primary, subkey };
+    let subject = Subject::Subkey {
+        primary,
+        subkey: subkey.key(),
+    };
     // A back-signature only grants, so unlike a certificate's other
     // statements, it counts only if it verifies outright.
-    let counts = |back: &&Signature| {
+    let mut counts = |back: &&Signature| {
         back.signature_type() == SignatureType::PRIMARY_KEY_BINDING
             && made.contains(&u64::from(back.creation_time()))
             && policy.accepts_hash_of(back)
-            && back.verify(subkey, subject).is_ok()
+            && back.verify_with(subkey, subject).is_ok()
     };
     let (covered, uncovered) = binding.embedded_by_area();
     let mut counted = false;
-    for back in uncovered.iter().filter(counts) {
+    for back in uncovered.iter().filter(&mut counts) {
         if signature_expires(back).is_some() {
             return Err(Reason::UnhonoredBinding);
         }
@@ -1262,7 +1266,7 @@ fn back_signature_lapse(
     }
     let mut lapses = covered
         .iter()
-        .filter(counts)
+        .filter(&mut counts)
         .map(signature_expires)
         .peekable();
     if !counted && lapses.peek().is_none() {

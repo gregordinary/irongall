@@ -239,13 +239,44 @@ impl Signature {
     ///
     /// # Errors
     ///
-    /// When the signature does not verify; the error says why.
+    /// When the signature does not verify; the error says why. Where more
+    /// than one reason applies, the first of these that does is given, in
+    /// this order, and everything before the last is checked before the
+    /// subject is hashed:
+    ///
+    /// 1. The signature's type is not made over a subject of this kind:
+    ///    [`VerifyError::UnsupportedType`] or [`VerifyError::WrongSubject`].
+    /// 2. The key cannot have made it: [`VerifyError::VersionMismatch`],
+    ///    [`VerifyError::AlgorithmMismatch`], or
+    ///    [`VerifyError::UnsupportedAlgorithm`], or
+    ///    [`VerifyError::BadSignature`] for material the key's algorithm
+    ///    cannot read.
+    /// 3. Its hash is one irongall does not implement,
+    ///    [`VerifyError::UnsupportedHash`], or one too short for its
+    ///    algorithm, [`VerifyError::HashTooShort`].
+    /// 4. irongall does not verify with the key's material: one of the RSA
+    ///    key's bounds, or [`VerifyError::InvalidKey`].
+    /// 5. The signature is not over the subject:
+    ///    [`VerifyError::HashPrefixMismatch`] or
+    ///    [`VerifyError::BadSignature`].
     pub fn verify(&self, key: &PublicKey, subject: Subject<'_>) -> Result<(), VerifyError> {
+        self.verify_with(&mut Verifier::new(key), subject)
+    }
+
+    /// [`verify`](Self::verify), with a key that may already be prepared,
+    /// and stays prepared for the next signature checked with it.
+    pub(crate) fn verify_with(
+        &self,
+        verifier: &mut Verifier<'_>,
+        subject: Subject<'_>,
+    ) -> Result<(), VerifyError> {
         self.check_subject(subject.kind())?;
-        let check = self.check_key(key)?;
-        let digests = self.digests(subject)?;
+        let value = self.check_key(verifier.key())?;
+        let context = self.context()?;
         self.check_hash_length()?;
-        self.check_digests(check, &digests)
+        verifier.prepared()?;
+        let digests = self.digests(context, subject)?;
+        self.check_digests(verifier, value, &digests)
     }
 
     /// Whether the signature's hash is shorter than its public-key algorithm
@@ -301,17 +332,32 @@ impl Signature {
         }
     }
 
-    /// Checks that `key` can have made the signature: of the signature's
-    /// version and public-key algorithm, and of an algorithm irongall
-    /// verifies with.
-    fn check_key<'k>(&'k self, key: &'k PublicKey) -> Result<Check<'k>, VerifyError> {
+    /// Checks that `key` can have made the signature, and reads its material
+    /// as the key's algorithm does: the key is of the signature's version
+    /// and public-key algorithm, and of an algorithm irongall verifies with.
+    ///
+    /// # Errors
+    ///
+    /// [`VerifyError::VersionMismatch`] and
+    /// [`VerifyError::AlgorithmMismatch`]; [`VerifyError::UnsupportedAlgorithm`]
+    /// if irongall does not verify with the key; and
+    /// [`VerifyError::BadSignature`] if it does but cannot read the
+    /// material, which the key then did not make: an EdDSALegacy signature
+    /// whose integers are wider than Ed25519's.
+    fn check_key(&self, key: &PublicKey) -> Result<Value<'_>, VerifyError> {
         if self.version != key.version() {
             return Err(VerifyError::VersionMismatch);
         }
         if self.public_key_algorithm != key.algorithm() {
             return Err(VerifyError::AlgorithmMismatch);
         }
-        Check::of(key, self.material())
+        match (VerifyingKey::of(key)?, self.material()) {
+            (VerifyingKey::Rsa { .. }, SignatureMaterial::Rsa(value)) => Ok(Value::Rsa(value)),
+            (VerifyingKey::Ed25519(_), SignatureMaterial::Ed25519(value)) => {
+                Ok(Value::Ed25519(value))
+            }
+            _ => Err(VerifyError::BadSignature),
+        }
     }
 
     /// Checks each hash the signature may be made over, as
@@ -320,10 +366,15 @@ impl Signature {
     ///
     /// When none verifies, the error is the last a hash whose prefix matches
     /// met, or, if no prefix matches, [`VerifyError::HashPrefixMismatch`].
-    fn check_digests(&self, check: Check<'_>, digests: &Digests) -> Result<(), VerifyError> {
+    fn check_digests(
+        &self,
+        verifier: &mut Verifier<'_>,
+        value: Value<'_>,
+        digests: &Digests,
+    ) -> Result<(), VerifyError> {
         let mut error = VerifyError::HashPrefixMismatch;
         for digest in digests.iter() {
-            match self.check_digest(check, digest) {
+            match self.check_digest(verifier, value, digest) {
                 Ok(()) => return Ok(()),
                 Err(VerifyError::HashPrefixMismatch) => {}
                 Err(other) => error = other,
@@ -334,11 +385,16 @@ impl Signature {
 
     /// Checks the hash the signature is made over against the two octets of
     /// it the signature carries, and then against the signature itself.
-    fn check_digest(&self, check: Check<'_>, digest: &Digest) -> Result<(), VerifyError> {
+    fn check_digest(
+        &self,
+        verifier: &mut Verifier<'_>,
+        value: Value<'_>,
+        digest: &Digest,
+    ) -> Result<(), VerifyError> {
         if self.prefix_of(digest) == Prefix::Differs {
             return Err(VerifyError::HashPrefixMismatch);
         }
-        self.check_equation(check, digest)
+        check_equation(verifier.prepared()?, value, digest)
     }
 
     /// Whether the two octets of its hash the signature carries are the
@@ -351,33 +407,15 @@ impl Signature {
         }
     }
 
-    /// Checks the signature itself against the hash it is made over, by the
-    /// public-key operation, whatever two octets of the hash it carries.
-    fn check_equation(&self, check: Check<'_>, digest: &Digest) -> Result<(), VerifyError> {
-        #[cfg(test)]
-        crate::test_support::work::operation();
-        match check {
-            Check::Rsa {
-                modulus,
-                exponent,
-                value,
-            } => rsa::PublicKey::new(modulus, exponent)
-                .and_then(|key| key.verify(digest, value))
-                .map_err(rsa_failure)?,
-            Check::Ed25519 { key, value } => ed25519::verify(key, digest, &value)?,
-        }
-        Ok(())
-    }
-
     /// The hashes the signature may be made over, if it is over `subject`
-    /// (RFC 9580 §5.2.4): a version 6 signature's salt, the subject's data,
-    /// and the trailer, under the signature's hash algorithm. There are two
-    /// only for a text document that GnuPG reads otherwise.
+    /// (RFC 9580 §5.2.4): a version 6 signature's salt, which `context`
+    /// holds, the subject's data, and the trailer, under the signature's
+    /// hash algorithm. There are two only for a text document that GnuPG
+    /// reads otherwise.
     ///
     /// The caller has checked that the signature's type is made over a
     /// subject of this kind.
-    fn digests(&self, subject: Subject<'_>) -> Result<Digests, VerifyError> {
-        let mut context = self.context()?;
+    fn digests(&self, mut context: Context, subject: Subject<'_>) -> Result<Digests, VerifyError> {
         let mut line_endings = None;
         match subject {
             Subject::Document(document) => {
@@ -522,9 +560,10 @@ pub(crate) enum Prefix {
 /// several of its parts, and every statement over each part: a version 4
 /// signature hashes nothing before the primary key, so the key is hashed here
 /// once for each hash algorithm, and each check hashes only what follows it.
+/// The key is prepared for its arithmetic once, too, for every equation.
 #[derive(Debug)]
 pub(crate) struct PrimaryChecks<'k> {
-    primary: &'k PublicKey,
+    primary: Verifier<'k>,
     /// The primary key framed as a version 4 signature frames it, under each
     /// hash algorithm a version 4 statement has been checked over so far,
     /// or the reason no such statement verifies: a hash algorithm irongall
@@ -535,7 +574,7 @@ pub(crate) struct PrimaryChecks<'k> {
 impl<'k> PrimaryChecks<'k> {
     pub(crate) fn new(primary: &'k PublicKey) -> PrimaryChecks<'k> {
         PrimaryChecks {
-            primary,
+            primary: Verifier::new(primary),
             hashed: Vec::new(),
         }
     }
@@ -545,7 +584,7 @@ impl<'k> PrimaryChecks<'k> {
     /// irongall reads, and over a hash irongall implements. Checking takes no
     /// hashing.
     pub(crate) fn may_have_made(&self, signature: &Signature) -> bool {
-        signature.check_key(self.primary).is_ok()
+        signature.check_key(self.primary.key()).is_ok()
             && Context::new(signature.hash_algorithm).is_some()
     }
 
@@ -569,8 +608,8 @@ impl<'k> PrimaryChecks<'k> {
         signature: &Signature,
         over: Over<'_>,
     ) -> Result<(), VerifyError> {
-        let (check, digest) = self.digest(signature, over)?;
-        signature.check_digest(check, &digest)
+        let (value, digest) = self.digest(signature, over)?;
+        signature.check_digest(&mut self.primary, value, &digest)
     }
 
     /// Checks that the primary key made `signature` over `over`, as
@@ -587,29 +626,27 @@ impl<'k> PrimaryChecks<'k> {
         signature: &Signature,
         over: Over<'_>,
     ) -> Result<Prefix, VerifyError> {
-        let (check, digest) = self.digest(signature, over)?;
-        signature.check_equation(check, &digest)?;
+        let (value, digest) = self.digest(signature, over)?;
+        check_equation(self.primary.prepared()?, value, &digest)?;
         Ok(signature.prefix_of(&digest))
     }
 
-    /// The check of `signature` with the primary key, and the hash it would
-    /// be made over were it over `over`, once the primary key may have made
-    /// it over a part of that kind.
+    /// The material of `signature` as the primary key's algorithm reads it,
+    /// and the hash it would be made over were it over `over`, once the
+    /// primary key may have made it over a part of that kind.
     fn digest<'s>(
         &mut self,
         signature: &'s Signature,
         over: Over<'_>,
-    ) -> Result<(Check<'s>, Digest), VerifyError>
-    where
-        'k: 's,
-    {
+    ) -> Result<(Value<'s>, Digest), VerifyError> {
         signature.check_subject(over.kind())?;
-        let check = signature.check_key(self.primary)?;
+        let primary = self.primary.key();
+        let value = signature.check_key(primary)?;
         let mut context = match signature.version {
             Version::V4 => self.hashed_primary(signature.hash_algorithm)?,
             Version::V6 => {
                 let mut context = signature.context()?;
-                signature.hash_key(&mut context, self.primary)?;
+                signature.hash_key(&mut context, primary)?;
                 context
             }
         };
@@ -618,7 +655,7 @@ impl<'k> PrimaryChecks<'k> {
             Over::UserId(user_id) => hash_user_id(&mut context, user_id)?,
             Over::Subkey(subkey) => signature.hash_key(&mut context, subkey)?,
         }
-        Ok((check, signature.trailed(context)))
+        Ok((value, signature.trailed(context)))
     }
 
     /// How many octets [`made_by`](Self::made_by) hashes checking
@@ -636,7 +673,10 @@ impl<'k> PrimaryChecks<'k> {
         };
         let before = match signature.version {
             Version::V4 => 0,
-            Version::V6 => signature.salt().len().saturating_add(framed(self.primary)),
+            Version::V6 => signature
+                .salt()
+                .len()
+                .saturating_add(framed(self.primary.key())),
         };
         let subject = match over {
             Over::Key => 0,
@@ -655,7 +695,7 @@ impl<'k> PrimaryChecks<'k> {
         if let Some((_, hashed)) = self.hashed.iter().find(|(held, _)| *held == algorithm) {
             return hashed.clone();
         }
-        let primary = self.primary;
+        let primary = self.primary.key();
         let hashed = Context::new(algorithm)
             .ok_or(VerifyError::UnsupportedHash)
             .and_then(|mut context| {
@@ -688,44 +728,93 @@ impl Digests {
     }
 }
 
-/// The cryptographic check a key and a signature's material call for.
-#[derive(Clone, Copy)]
-enum Check<'a> {
-    Rsa {
-        modulus: &'a [u8],
-        exponent: &'a [u8],
-        value: &'a [u8],
-    },
-    Ed25519 {
-        key: &'a [u8; 32],
-        value: [u8; 64],
-    },
+/// A signature's material, as the algorithm of the key it is checked with
+/// reads it.
+#[derive(Debug, Clone, Copy)]
+enum Value<'a> {
+    /// An RSA signature's integer.
+    Rsa(&'a [u8]),
+    /// An Ed25519 signature in its native encoding.
+    Ed25519([u8; 64]),
 }
 
-impl<'a> Check<'a> {
-    /// The check for `key` and a signature of the key's algorithm whose
-    /// material is `material`.
+/// Checks `value`, a signature's material, against `digest`, the hash it is
+/// made over, by `key`'s public-key operation, whatever two octets of the
+/// hash the signature carries.
+fn check_equation(key: &PreparedKey, value: Value<'_>, digest: &Digest) -> Result<(), VerifyError> {
+    #[cfg(test)]
+    crate::test_support::work::operation();
+    match (key, value) {
+        (PreparedKey::Rsa(key), Value::Rsa(value)) => {
+            key.verify(digest, value).map_err(rsa_failure)
+        }
+        (PreparedKey::Ed25519(key), Value::Ed25519(value)) => Ok(key.verify(digest, &value)?),
+        // Both are read by the key's algorithm, so they never differ.
+        _ => Err(VerifyError::BadSignature),
+    }
+}
+
+/// A key to verify signatures with, prepared for its arithmetic the first
+/// time an equation needs it, and once only, however many signatures are
+/// checked with it: an RSA key's modulus set up for Montgomery
+/// multiplication, which is close to the work of a verification with the
+/// key, or an Ed25519 key's point decoded.
+#[derive(Debug)]
+pub(crate) struct Verifier<'k> {
+    key: &'k PublicKey,
+    /// The key prepared, or the reason irongall does not verify with it,
+    /// once asked for.
+    prepared: Option<Result<PreparedKey, VerifyError>>,
+}
+
+impl<'k> Verifier<'k> {
+    /// `key`, not yet prepared.
+    pub(crate) fn new(key: &'k PublicKey) -> Verifier<'k> {
+        Verifier {
+            key,
+            prepared: None,
+        }
+    }
+
+    /// The key.
+    pub(crate) fn key(&self) -> &'k PublicKey {
+        self.key
+    }
+
+    /// The key prepared, preparing it if this is the first time.
     ///
     /// # Errors
     ///
-    /// [`VerifyError::UnsupportedAlgorithm`] if irongall does not verify with
-    /// the key, and [`VerifyError::BadSignature`] if it does but cannot read
-    /// the material, which the key then did not make: an EdDSALegacy
-    /// signature whose integers are wider than Ed25519's.
-    fn of(key: &'a PublicKey, material: SignatureMaterial<'a>) -> Result<Check<'a>, VerifyError> {
-        match (VerifyingKey::of(key)?, material) {
-            (VerifyingKey::Rsa { modulus, exponent }, SignatureMaterial::Rsa(value)) => {
-                Ok(Check::Rsa {
-                    modulus,
-                    exponent,
-                    value,
-                })
-            }
-            (VerifyingKey::Ed25519(key), SignatureMaterial::Ed25519(value)) => {
-                Ok(Check::Ed25519 { key, value })
-            }
-            _ => Err(VerifyError::BadSignature),
+    /// The reason irongall does not verify with the key: one of the errors
+    /// [`VerifyError::is_key_error`] names.
+    fn prepared(&mut self) -> Result<&PreparedKey, VerifyError> {
+        let key = self.key;
+        match self.prepared.get_or_insert_with(|| PreparedKey::of(key)) {
+            Ok(prepared) => Ok(prepared),
+            Err(error) => Err(*error),
         }
+    }
+}
+
+/// A key prepared for verifying: an RSA key ready for its arithmetic, or an
+/// Ed25519 key's point decoded and checked.
+#[derive(Debug, Clone)]
+enum PreparedKey {
+    Rsa(rsa::PublicKey),
+    Ed25519(ed25519::VerifyingKey),
+}
+
+impl PreparedKey {
+    /// `key` prepared, through the checks [`check_verifying_key`] makes.
+    fn of(key: &PublicKey) -> Result<PreparedKey, VerifyError> {
+        #[cfg(test)]
+        crate::test_support::work::prepared();
+        Ok(match VerifyingKey::of(key)? {
+            VerifyingKey::Rsa { modulus, exponent } => {
+                PreparedKey::Rsa(rsa::PublicKey::new(modulus, exponent).map_err(rsa_failure)?)
+            }
+            VerifyingKey::Ed25519(key) => PreparedKey::Ed25519(ed25519::VerifyingKey::new(key)?),
+        })
     }
 }
 
@@ -769,9 +858,11 @@ impl<'a> VerifyingKey<'a> {
 /// algorithm's verification accepts.
 ///
 /// A key that fails verifies no signature, whatever its material, and the
-/// error is one of those [`VerifyError::is_key_error`] names. Verifying a
-/// signature checks the same, through the same checks, once it has hashed
-/// the signature's subject.
+/// error is one of those [`VerifyError::is_key_error`] names. Preparing a key
+/// to verify with checks the same, through the same checks, and a
+/// verification prepares its key before it hashes the signature's subject.
+/// This check prepares nothing, so it costs little more than reading the
+/// key's material.
 pub(crate) fn check_verifying_key(key: &PublicKey) -> Result<(), VerifyError> {
     match VerifyingKey::of(key)? {
         VerifyingKey::Rsa { modulus, exponent } => {
@@ -858,11 +949,17 @@ impl<'a> DocumentHash<'a> {
     ///
     /// # Errors
     ///
-    /// When the signature does not verify; the error says why.
+    /// When the signature does not verify; the error says why. Where more
+    /// than one reason applies, the error is the one
+    /// [`Signature::verify`] gives, and the key is checked before the
+    /// document's hashes are finished.
     pub fn verify(&self, key: &PublicKey) -> Result<(), VerifyError> {
-        let check = self.signature.check_key(key)?;
+        let mut verifier = Verifier::new(key);
+        let value = self.signature.check_key(key)?;
         self.signature.check_hash_length()?;
-        self.signature.check_digests(check, &self.digests())
+        verifier.prepared()?;
+        self.signature
+            .check_digests(&mut verifier, value, &self.digests())
     }
 
     /// The document passed so far, ready to be checked against one key
@@ -905,9 +1002,11 @@ impl DocumentChecks<'_, '_> {
     /// [`PrimaryChecks::made_by`]).
     pub(crate) fn made_by(&mut self, key: &PublicKey) -> Result<(), VerifyError> {
         let hash = self.hash;
-        let check = hash.signature.check_key(key)?;
+        let mut verifier = Verifier::new(key);
+        let value = hash.signature.check_key(key)?;
+        verifier.prepared()?;
         let digests = self.digests.get_or_insert_with(|| hash.digests());
-        hash.signature.check_digests(check, digests)
+        hash.signature.check_digests(&mut verifier, value, digests)
     }
 }
 

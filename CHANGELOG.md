@@ -47,6 +47,18 @@ public API changes, since a verifier's verdicts are part of its contract.
   its size, and a keyring in at most 22 times once it is a `Keyring` and 44
   times while its certificates are combined into one, where 0.1.2 held them
   in up to 16, 28, and 56 times.
+- A key is prepared for the arithmetic of verifying once for every
+  signature checked with it: judging a certificate prepares its primary key
+  once rather than for each of its statements, and a subkey once for the
+  back-signatures of its bindings. Preparing an RSA key took about 40% of
+  the time each verification with it did.
+- `Signature::verify` and `DocumentHash::verify` refuse a key irongall does
+  not verify with, and a hash too short for the signature's algorithm,
+  before they hash the subject. A signature that is checked with such a key
+  and is not over the subject is now refused for the key, such as
+  `VerifyError::ModulusTooLong`, where earlier releases reported
+  `VerifyError::HashPrefixMismatch`. The documentation of
+  `Signature::verify` gives the order in which the errors are reported.
 
 ### Security
 

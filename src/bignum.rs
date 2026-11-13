@@ -54,6 +54,16 @@ impl Modulus {
         Some(modulus)
     }
 
+    /// The modulus's length in octets, without leading zeros.
+    pub(crate) fn octet_length(&self) -> usize {
+        self.octets
+    }
+
+    /// The modulus's width in bits.
+    pub(crate) fn bits(&self) -> usize {
+        bits(&self.limbs)
+    }
+
     /// `base^exponent mod n`, big-endian in as many octets as the modulus, or
     /// `None` if `base` is not below the modulus.
     pub(crate) fn pow(&self, base: &[u8], exponent: u64) -> Option<Vec<u8>> {
@@ -188,8 +198,19 @@ impl Modulus {
 }
 
 /// The number of significant bits in the big-endian value `big_endian`.
+///
+/// Read from the octets, without converting them to limbs, so asking it of
+/// a key's modulus costs nothing however often it is asked.
 pub(crate) fn bit_length(big_endian: &[u8]) -> usize {
-    bits(&limbs(big_endian))
+    let Some(at) = big_endian.iter().position(|&octet| octet != 0) else {
+        return 0;
+    };
+    let unused = big_endian.get(at).map_or(0, |octet| octet.leading_zeros());
+    big_endian
+        .len()
+        .saturating_sub(at)
+        .saturating_mul(8)
+        .saturating_sub(usize::try_from(unused).unwrap_or(0))
 }
 
 /// The big-endian value `big_endian`, if it fits in 64 bits.
@@ -452,6 +473,31 @@ mod tests {
         );
         assert_eq!(to_u64(&[1, 0, 0, 0, 0, 0, 0, 0, 0]), None);
         assert_eq!(to_u64(&[]), Some(0));
+    }
+
+    /// The bit length read from the octets is the one the limbs hold.
+    #[test]
+    fn bit_length_reads_the_octets() {
+        let mut rng = Rng::new(4);
+        let mut checked = 0;
+        for octets in 0..=80 {
+            for _ in 0..16 {
+                let mut value = rng.bytes(octets);
+                // Leading zero octets, then a first octet of any width.
+                let zeros = rng.below(octets + 1);
+                value[..zeros].fill(0);
+                if let Some(first) = value.get_mut(zeros) {
+                    *first >>= rng.below(8);
+                }
+                assert_eq!(
+                    bit_length(&value),
+                    super::bits(&super::limbs(&value)),
+                    "{value:02x?}"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 1296);
     }
 
     #[test]

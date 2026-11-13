@@ -100,11 +100,10 @@ impl core::error::Error for RsaError {}
 /// every verification with it repeats.
 #[derive(Clone)]
 pub struct PublicKey {
+    /// The modulus, whose length in octets sets the length of the encoding a
+    /// signature must recover.
     modulus: Modulus,
     exponent: u64,
-    /// The modulus's width in bits, which sets the length of the encoding a
-    /// signature must recover.
-    bits: usize,
 }
 
 impl PublicKey {
@@ -123,13 +122,8 @@ impl PublicKey {
     /// that is even or less than 3.
     pub fn new(modulus: &[u8], exponent: &[u8]) -> Result<PublicKey, RsaError> {
         let exponent = check_key(modulus, exponent)?;
-        let bits = bignum::bit_length(modulus);
         let modulus = Modulus::new(modulus).ok_or(RsaError::InvalidKey)?;
-        Ok(PublicKey {
-            modulus,
-            exponent,
-            bits,
-        })
+        Ok(PublicKey { modulus, exponent })
     }
 
     /// Verifies that `signature`, a big-endian integer whose leading zeros
@@ -146,7 +140,7 @@ impl PublicKey {
             .modulus
             .pow(signature, self.exponent)
             .ok_or(RsaError::BadSignature)?;
-        if recovered == encoding(digest, self.bits.div_ceil(8)) {
+        if recovered == encoding(digest, self.modulus.octet_length()) {
             Ok(())
         } else {
             Err(RsaError::BadSignature)
@@ -160,7 +154,7 @@ impl PublicKey {
 impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PublicKey")
-            .field("bits", &self.bits)
+            .field("bits", &self.modulus.bits())
             .field("exponent", &self.exponent)
             .finish_non_exhaustive()
     }

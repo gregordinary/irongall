@@ -82,10 +82,12 @@ fn v4_prefix_offset(body: &[u8]) -> usize {
 /// The hash `signature` is made over, if it is over `subject`, for a subject
 /// that GnuPG does not read otherwise, and so has one.
 fn only_digest(signature: &Signature, subject: Subject<'_>) -> Result<Digest, VerifyError> {
-    signature.digests(subject).map(|digests| {
-        assert_eq!(digests.gnupg, None);
-        digests.digest
-    })
+    signature
+        .digests(signature.context()?, subject)
+        .map(|digests| {
+            assert_eq!(digests.gnupg, None);
+            digests.digest
+        })
 }
 
 /// The body of a version 4 signature, its hash algorithm made `algorithm`,
@@ -428,11 +430,10 @@ fn refusals() {
     }
     for algorithm in [HashAlgorithm::SHA1, HashAlgorithm::SHA224] {
         let body = rehashed(&a2_body, algorithm, document);
-        assert_eq!(
-            signature_of(&body).verify(&key, document),
-            Err(VerifyError::HashTooShort),
-            "{algorithm}"
-        );
+        let (verdict, work) = work::of(|| signature_of(&body).verify(&key, document));
+        assert_eq!(verdict, Err(VerifyError::HashTooShort), "{algorithm}");
+        // Refused before the document is hashed.
+        assert_eq!(work.hashed, 0, "{algorithm}");
     }
     // An identity point, and a point that is not canonically encoded: the
     // y-coordinate p, which is 0.
@@ -511,7 +512,23 @@ fn refusals() {
         (rsa_key(1, &odd(2048), &f4), VerifyError::BadSignature),
         (rsa.subkeys()[0].key().clone(), VerifyError::BadSignature),
     ] {
-        assert_eq!(certification.verify(&key, subject), Err(expected));
+        let (verdict, work) = work::of(|| certification.verify(&key, subject));
+        assert_eq!(verdict, Err(expected));
+        assert_eq!(work.prepared, 1, "{expected:?}");
+        if expected.is_key_error() {
+            // A key irongall does not verify with is refused before the
+            // subject is hashed, and whatever the signature is checked
+            // over: over another user ID, its prefix would not match.
+            assert_eq!(work.hashed, 0, "{expected:?}");
+            assert_eq!(work.operations, 0, "{expected:?}");
+            let other = Subject::UserId {
+                key: primary,
+                user_id: b"another",
+            };
+            assert_eq!(certification.verify(&key, other), Err(expected));
+        } else {
+            assert_eq!(work.operations, 1, "{expected:?}");
+        }
     }
     assert_eq!(certification.verify(primary, subject), Ok(()));
 

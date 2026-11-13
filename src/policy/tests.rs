@@ -1504,6 +1504,42 @@ fn a_key_the_policy_refuses_cannot_sign() {
     }
 }
 
+/// Judging a certificate prepares its primary key for the arithmetic of
+/// its equations once, however many statements it checks, and a subkey once
+/// for all the back-signatures its bindings embed.
+#[test]
+fn judging_prepares_each_key_once() {
+    for primary in [Key::rsa(Version::V4, CREATED), ed25519(1)] {
+        let subkey = ed25519(2);
+        let mut packets = vec![primary.primary()];
+        for index in 0..5 {
+            let user_id = format!("user {index}");
+            packets.push(forge::user_id(&user_id));
+            for created in [CREATED, CREATED + DAY] {
+                let flags = Some(CERTIFY | SIGN);
+                packets.push(certification_of(&primary, &user_id, created, flags, None));
+            }
+        }
+        packets.push(subkey.subkey());
+        packets.push(binding(&primary, &subkey, CREATED, SIGN));
+        packets.push(
+            primary
+                .sign(SignatureType::SUBKEY_BINDING, CREATED + DAY)
+                .key_flags(SIGN)
+                .embed(&back_signature(&primary, &subkey, CREATED))
+                .embed(&back_signature(&primary, &subkey, CREATED + DAY))
+                .over_subkey(&primary, &subkey),
+        );
+        let packets: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
+        let certificate = forge::certificate(&packets);
+        let (judged, work) = work::of(|| standings(&certificate, NOW));
+        assert!(judged.iter().all(Result::is_ok), "{judged:?}");
+        // Ten certifications, two bindings, and two back-signatures.
+        assert_eq!(work.operations, 14);
+        assert_eq!(work.prepared, 2);
+    }
+}
+
 #[test]
 fn a_signature_dated_before_its_key_existed_is_refused() {
     let primary = ed25519(1);

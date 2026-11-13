@@ -47,62 +47,92 @@ pub(crate) enum Ed25519Error {
     BadSignature,
 }
 
-/// Verifies that `signature`, in its native encoding (RFC 8032 §5.1.6), is
-/// the signature of the key `key`, in its native encoding (§5.1.5), over
-/// `digest`.
+/// An Ed25519 key irongall verifies with: the canonical encoding of a point
+/// not of small order.
 ///
-/// A digest of any length is the message signed. RFC 9580 forbids accepting
-/// an OpenPGP signature over a digest shorter than 256 bits, and
-/// [`Signature::verify`](crate::signature::Signature::verify) applies that
-/// floor, since it is OpenPGP's rule and not Ed25519's.
-pub(crate) fn verify(
-    key: &[u8; 32],
-    digest: &Digest,
-    signature: &[u8; 64],
-) -> Result<(), Ed25519Error> {
-    verify_message(key, digest.as_bytes(), signature)
+/// The key is decoded and checked once, when it is made, for every
+/// signature verified with it.
+#[derive(Debug, Clone)]
+pub(crate) struct VerifyingKey {
+    /// The key in its native encoding (RFC 8032 §5.1.5), which every
+    /// signature's hash covers.
+    encoding: [u8; 32],
+    /// The point's negation, `-A`, which the equation multiplies.
+    negated: Point,
+}
+
+impl VerifyingKey {
+    /// The key whose native encoding is `key`.
+    ///
+    /// # Errors
+    ///
+    /// [`Ed25519Error::InvalidKey`] for an encoding that is not canonical,
+    /// or a point of small order.
+    pub(crate) fn new(key: &[u8; 32]) -> Result<VerifyingKey, Ed25519Error> {
+        let a = Point::decode(key).ok_or(Ed25519Error::InvalidKey)?;
+        if a.has_small_order() {
+            return Err(Ed25519Error::InvalidKey);
+        }
+        Ok(VerifyingKey {
+            encoding: *key,
+            negated: a.negate(),
+        })
+    }
+
+    /// Verifies that `signature`, in its native encoding (RFC 8032 §5.1.6),
+    /// is the key's signature over `digest`.
+    ///
+    /// A digest of any length is the message signed. RFC 9580 forbids
+    /// accepting an OpenPGP signature over a digest shorter than 256 bits,
+    /// and [`Signature::verify`](crate::signature::Signature::verify) applies
+    /// that floor, since it is OpenPGP's rule and not Ed25519's.
+    pub(crate) fn verify(&self, digest: &Digest, signature: &[u8; 64]) -> Result<(), Ed25519Error> {
+        self.verify_message(digest.as_bytes(), signature)
+    }
+
+    /// Verifies `signature` over `message` (RFC 8032 §5.1.7), under the
+    /// rules in the module's documentation.
+    fn verify_message(&self, message: &[u8], signature: &[u8; 64]) -> Result<(), Ed25519Error> {
+        let (Some(r), Some(s)) = (signature.first_chunk::<32>(), signature.last_chunk::<32>())
+        else {
+            return Err(Ed25519Error::BadSignature);
+        };
+        let s = Scalar::from_canonical_bytes(s).ok_or(Ed25519Error::BadSignature)?;
+        let mut hash = Sha512::new();
+        hash.update(r);
+        hash.update(&self.encoding);
+        hash.update(message);
+        let k = Scalar::reduce(&hash.finalize());
+        // [S]B - [k]A, which is R if the signature is valid.
+        let computed = point::double_scalar_multiply(&s, &k, &self.negated);
+        if computed.encode() != *r || computed.has_small_order() {
+            return Err(Ed25519Error::BadSignature);
+        }
+        Ok(())
+    }
 }
 
 /// Checks that `key`, in its native encoding, is a key irongall verifies
-/// with: the canonical encoding of a point not of small order.
+/// with (see [`VerifyingKey`]).
 ///
-/// [`verify`] refuses any other key whatever the signature, and the policy
-/// accepts no other key, through this one check.
+/// [`VerifyingKey::new`] refuses any other key, and the policy accepts no
+/// other key, through this one check.
 pub(crate) fn check_key(key: &[u8; 32]) -> Result<(), Ed25519Error> {
-    decode_key(key).map(drop)
+    VerifyingKey::new(key).map(drop)
 }
 
-/// The point `key` encodes, if it is a key irongall verifies with (see
-/// [`check_key`]).
-fn decode_key(key: &[u8; 32]) -> Result<Point, Ed25519Error> {
-    let a = Point::decode(key).ok_or(Ed25519Error::InvalidKey)?;
-    if a.has_small_order() {
-        return Err(Ed25519Error::InvalidKey);
-    }
-    Ok(a)
+/// [`VerifyingKey::verify`], for a key in its native encoding.
+#[cfg(test)]
+fn verify(key: &[u8; 32], digest: &Digest, signature: &[u8; 64]) -> Result<(), Ed25519Error> {
+    VerifyingKey::new(key)?.verify(digest, signature)
 }
 
-/// Verifies `signature` over `message` (RFC 8032 §5.1.7), under the rules
-/// in the module's documentation.
+/// [`VerifyingKey::verify_message`], for a key in its native encoding.
+#[cfg(test)]
 fn verify_message(
     key: &[u8; 32],
     message: &[u8],
     signature: &[u8; 64],
 ) -> Result<(), Ed25519Error> {
-    let a = decode_key(key)?;
-    let (Some(r), Some(s)) = (signature.first_chunk::<32>(), signature.last_chunk::<32>()) else {
-        return Err(Ed25519Error::BadSignature);
-    };
-    let s = Scalar::from_canonical_bytes(s).ok_or(Ed25519Error::BadSignature)?;
-    let mut hash = Sha512::new();
-    hash.update(r);
-    hash.update(key);
-    hash.update(message);
-    let k = Scalar::reduce(&hash.finalize());
-    // [S]B - [k]A, which is R if the signature is valid.
-    let computed = point::double_scalar_multiply(&s, &k, &a.negate());
-    if computed.encode() != *r || computed.has_small_order() {
-        return Err(Ed25519Error::BadSignature);
-    }
-    Ok(())
+    VerifyingKey::new(key)?.verify_message(message, signature)
 }

@@ -454,9 +454,9 @@ mod tests {
     use super::{Fingerprint, KeyId, KeyMaterial, PublicKey, PublicKeyAlgorithm};
     use crate::armor;
     use crate::hash::{HashFunction as _, Sha1};
-    use crate::packet::{PacketError, PacketErrorKind, Tag, Version, packets};
-    use crate::test_support::hex;
+    use crate::packet::{PacketErrorKind, Tag, Version, packets};
     use crate::test_support::rfc9580::{A1_KEY, A3_CERTIFICATE};
+    use crate::test_support::{hex, key_of};
 
     /// The keys among the packets of an armored block.
     fn keys(armored: &str) -> Vec<PublicKey> {
@@ -466,17 +466,6 @@ mod tests {
             .filter(|packet| matches!(packet.tag(), Tag::PUBLIC_KEY | Tag::PUBLIC_SUBKEY))
             .map(|packet| PublicKey::from_packet(&packet).unwrap())
             .collect()
-    }
-
-    /// Reads `body` as the body of a Public Key packet whose header is six
-    /// octets long, so that the body's fields begin at offset 6: the version
-    /// at 6, the creation time at 7, the algorithm at 11, and the material
-    /// (or a version 6 key's material length) at 12.
-    fn parse(body: &[u8]) -> Result<PublicKey, PacketError> {
-        let length = u32::try_from(body.len()).unwrap().to_be_bytes();
-        let input = [&[0xC6, 0xFF][..], &length, body].concat();
-        let packet = packets(&input).next().unwrap().unwrap();
-        PublicKey::from_packet(&packet)
     }
 
     /// A key body of `version`, created at 0x01020304, of `algorithm`, with
@@ -491,7 +480,7 @@ mod tests {
     }
 
     fn failure(body: &[u8]) -> (PacketErrorKind, usize) {
-        let error = parse(body).unwrap_err();
+        let error = key_of(body).unwrap_err();
         (error.kind(), error.offset())
     }
 
@@ -550,7 +539,7 @@ mod tests {
     fn rsa_material() {
         // A version 4 MPI may count leading zeros; the value drops them.
         let material = [0x00, 0x10, 0x00, 0xC5, 0x00, 0x11, 0x01, 0x00, 0x01];
-        let key = parse(&body(4, 1, &material)).unwrap();
+        let key = key_of(&body(4, 1, &material)).unwrap();
         assert_eq!(
             key.material(),
             KeyMaterial::Rsa {
@@ -559,7 +548,7 @@ mod tests {
             }
         );
         for algorithm in [2, 3] {
-            let key = parse(&body(4, algorithm, &material)).unwrap();
+            let key = key_of(&body(4, algorithm, &material)).unwrap();
             assert!(matches!(key.material(), KeyMaterial::Rsa { .. }));
         }
         // Version 6 requires the exact length.
@@ -569,7 +558,7 @@ mod tests {
         );
         let exact = [0x00, 0x08, 0xC5, 0x00, 0x11, 0x01, 0x00, 0x01];
         assert!(matches!(
-            parse(&body(6, 1, &exact)).unwrap().material(),
+            key_of(&body(6, 1, &exact)).unwrap().material(),
             KeyMaterial::Rsa { .. }
         ));
     }
@@ -578,7 +567,7 @@ mod tests {
     /// among them, rather than the body it reads them from.
     #[test]
     fn debug_shows_what_the_accessors_read() {
-        let key = parse(&body(4, 27, &[0x11; 32])).unwrap();
+        let key = key_of(&body(4, 27, &[0x11; 32])).unwrap();
         let shown = format!("{key:?}");
         for field in [
             format!("material: {:?}", key.material()),
@@ -591,13 +580,13 @@ mod tests {
 
     #[test]
     fn ed25519_material() {
-        let key = parse(&body(4, 27, &[0x11; 32])).unwrap();
+        let key = key_of(&body(4, 27, &[0x11; 32])).unwrap();
         assert_eq!(key.material(), KeyMaterial::Ed25519(&[0x11; 32]));
-        let key = parse(&body(6, 27, &[0x11; 32])).unwrap();
+        let key = key_of(&body(6, 27, &[0x11; 32])).unwrap();
         assert_eq!(key.material(), KeyMaterial::Ed25519(&[0x11; 32]));
 
         let point = [&[0x40][..], &[0x22; 32]].concat();
-        let key = parse(&body(4, 22, &eddsa_legacy(&point))).unwrap();
+        let key = key_of(&body(4, 22, &eddsa_legacy(&point))).unwrap();
         assert_eq!(key.material(), KeyMaterial::Ed25519(&[0x22; 32]));
     }
 
@@ -618,7 +607,7 @@ mod tests {
             // RFC 9580 §9.2 forbids the deprecated curves in version 6.
             (6, 22, &eddsa_legacy(&[&[0x40][..], &[0x22; 32]].concat())),
         ] {
-            let key = parse(&body(version, algorithm, material)).unwrap();
+            let key = key_of(&body(version, algorithm, material)).unwrap();
             assert_eq!(key.material(), KeyMaterial::Opaque, "{version} {algorithm}");
         }
     }
@@ -720,13 +709,13 @@ mod tests {
     #[test]
     fn version_4_fingerprints_cover_the_body_up_to_65535_octets() {
         let longest = body(4, 100, &[0x44; 65535 - 6]);
-        let key = parse(&longest).unwrap();
+        let key = key_of(&longest).unwrap();
         let mut hash = Sha1::new();
         hash.update(&[0x99, 0xFF, 0xFF]);
         hash.update(&longest);
         assert_eq!(key.fingerprint(), Fingerprint::V4(hash.finalize()));
 
-        let error = parse(&body(4, 100, &[0x44; 65536 - 6])).unwrap_err();
+        let error = key_of(&body(4, 100, &[0x44; 65536 - 6])).unwrap_err();
         assert_eq!(
             (error.kind(), error.offset()),
             (PacketErrorKind::KeyTooLong, 0)
@@ -735,7 +724,7 @@ mod tests {
 
     #[test]
     fn formatting() {
-        let key = parse(&body(4, 27, &[0x11; 32])).unwrap();
+        let key = key_of(&body(4, 27, &[0x11; 32])).unwrap();
         let fingerprint = key.fingerprint().to_string();
         assert_eq!(fingerprint.len(), 40);
         assert!(fingerprint.ends_with(&key.key_id().to_string()));

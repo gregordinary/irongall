@@ -9,7 +9,6 @@ use super::{
     LineEndings, Over, Prefix, PrimaryChecks, Subject, SubjectKind, VerifyError, kinds,
     statement_kinds,
 };
-use crate::armor;
 use crate::cert::{self, Certificate};
 use crate::hash::{Context, Digest, HashAlgorithm, HashFunction as _, Sha256};
 use crate::key::{KeyMaterial, PublicKey};
@@ -17,13 +16,9 @@ use crate::packet::{self, Packet, Version};
 use crate::signature::{Signature, SignatureType};
 use crate::test_support::rfc9580::{A1_KEY, A2_SIGNATURE, A3_CERTIFICATE, A6_SIGNATURE, A6_TEXT};
 use crate::test_support::{
-    Rng, digest, forge, hashed_key, hashed_user_id, signature_digest, signature_input,
-    vector_bytes, work,
+    Rng, dearmor, digest, forge, hashed_key, hashed_user_id, key_of, mpi, signature_digest,
+    signature_input, signature_of, vector_bytes, work,
 };
-
-fn dearmor(armored: &str) -> Vec<u8> {
-    armor::decode(armored.as_bytes()).unwrap().into_data()
-}
 
 /// The one packet in `data`.
 fn only_packet(data: &[u8]) -> Packet<'_> {
@@ -48,37 +43,6 @@ fn only_certificate(data: &[u8]) -> Certificate {
     certificate
 }
 
-/// The key a Public Key packet with `body` holds.
-fn key_of(body: &[u8]) -> PublicKey {
-    let length = u32::try_from(body.len()).unwrap().to_be_bytes();
-    let input = [&[0xC6, 0xFF][..], &length, body].concat();
-    PublicKey::from_packet(&only_packet(&input)).unwrap()
-}
-
-/// The signature a Signature packet with `body` holds.
-fn signature_of(body: &[u8]) -> Signature {
-    let length = u32::try_from(body.len()).unwrap().to_be_bytes();
-    let input = [&[0xC2, 0xFF][..], &length, body].concat();
-    Signature::from_packet(&only_packet(&input)).unwrap()
-}
-
-/// A multiprecision integer of `value`, whose first octet is not zero.
-fn mpi(value: &[u8]) -> Vec<u8> {
-    let bits = value.len() * 8 - value[0].leading_zeros() as usize;
-    [&u16::try_from(bits).unwrap().to_be_bytes()[..], value].concat()
-}
-
-/// Where the hash prefix is in the body of a version 4 signature.
-fn v4_prefix_offset(body: &[u8]) -> usize {
-    let hashed = usize::from(u16::from_be_bytes([body[4], body[5]]));
-    let unhashed_at = 6 + hashed;
-    let unhashed = usize::from(u16::from_be_bytes([
-        body[unhashed_at],
-        body[unhashed_at + 1],
-    ]));
-    unhashed_at + 2 + unhashed
-}
-
 /// The hash `signature` is made over, if it is over `subject`, for a subject
 /// that GnuPG does not read otherwise, and so has one.
 fn only_digest(signature: &Signature, subject: Subject<'_>) -> Result<Digest, VerifyError> {
@@ -95,8 +59,8 @@ fn only_digest(signature: &Signature, subject: Subject<'_>) -> Result<Digest, Ve
 fn rehashed(body: &[u8], algorithm: HashAlgorithm, subject: Subject<'_>) -> Vec<u8> {
     let mut body = body.to_vec();
     body[3] = algorithm.number();
-    let digest = only_digest(&signature_of(&body), subject).unwrap();
-    let at = v4_prefix_offset(&body);
+    let digest = only_digest(&signature_of(&body).unwrap(), subject).unwrap();
+    let at = forge::Layout::of(&body).prefix;
     body[at..at + 2].copy_from_slice(&digest.as_bytes()[..2]);
     body
 }
@@ -322,7 +286,7 @@ fn signature_types_and_their_subjects() {
     ] {
         let mut retyped = body.clone();
         retyped[1] = number;
-        let signature = signature_of(&retyped);
+        let signature = signature_of(&retyped).unwrap();
         assert_eq!(
             signature.verify(&key, subject),
             Err(expected),
@@ -365,7 +329,7 @@ fn keys_are_framed_by_the_signatures_version() {
     let mut body = vec![6, 0, 0, 0, 0, 100];
     body.extend_from_slice(&70_000_u32.to_be_bytes());
     body.resize(body.len() + 70_000, 0x44);
-    let long = key_of(&body);
+    let long = key_of(&body).unwrap();
     let binding = &v4.subkeys()[0].signatures()[0];
     assert_eq!(
         only_digest(
@@ -385,7 +349,7 @@ fn refusals() {
     // A version 4 EdDSALegacy key and its binary signature over "OpenPGP".
     let key = PublicKey::from_packet(&only_packet(&dearmor(A1_KEY))).unwrap();
     let a2_body = only_packet(&dearmor(A2_SIGNATURE)).body().to_vec();
-    let a2 = signature_of(&a2_body);
+    let a2 = signature_of(&a2_body).unwrap();
     let document = Subject::Document(b"OpenPGP");
     let point = |key: &PublicKey| match key.material() {
         KeyMaterial::Ed25519(native) => native.to_vec(),
@@ -402,6 +366,7 @@ fn refusals() {
             ]
             .concat(),
         )
+        .unwrap()
     };
     assert_eq!(eddsa_legacy(&point(&key)).body(), key.body());
 
@@ -412,7 +377,7 @@ fn refusals() {
         Err(VerifyError::VersionMismatch)
     );
     // The same point as an Ed25519 key rather than an EdDSALegacy one.
-    let ed25519 = key_of(&[&[4, 0x53, 0xF3, 0x5F, 0x0B, 27][..], &point(&key)].concat());
+    let ed25519 = key_of(&[&[4, 0x53, 0xF3, 0x5F, 0x0B, 27][..], &point(&key)].concat()).unwrap();
     assert_eq!(
         a2.verify(&ed25519, document),
         Err(VerifyError::AlgorithmMismatch)
@@ -423,14 +388,14 @@ fn refusals() {
         let mut body = a2_body.clone();
         body[3] = number;
         assert_eq!(
-            signature_of(&body).verify(&key, document),
+            signature_of(&body).unwrap().verify(&key, document),
             Err(VerifyError::UnsupportedHash),
             "{number}"
         );
     }
     for algorithm in [HashAlgorithm::SHA1, HashAlgorithm::SHA224] {
         let body = rehashed(&a2_body, algorithm, document);
-        let (verdict, work) = work::of(|| signature_of(&body).verify(&key, document));
+        let (verdict, work) = work::of(|| signature_of(&body).unwrap().verify(&key, document));
         assert_eq!(verdict, Err(VerifyError::HashTooShort), "{algorithm}");
         // Refused before the document is hashed.
         assert_eq!(work.hashed, 0, "{algorithm}");
@@ -455,14 +420,14 @@ fn refusals() {
     // Integers wider than Ed25519's, as an EdDSALegacy signature over
     // another curve carries them: no signature the key made, though the key
     // is one irongall verifies with.
-    let material = v4_prefix_offset(&a2_body) + 2;
+    let material = forge::Layout::of(&a2_body).prefix + 2;
     let wide = [&a2_body[..material], &mpi(&[0x5A; 57]), &mpi(&[0x5A; 57])].concat();
     assert_eq!(
-        signature_of(&wide).material(),
+        signature_of(&wide).unwrap().material(),
         crate::signature::SignatureMaterial::Opaque
     );
     assert_eq!(
-        signature_of(&wide).verify(&key, document),
+        signature_of(&wide).unwrap().verify(&key, document),
         Err(VerifyError::BadSignature)
     );
     // Other data.
@@ -490,6 +455,7 @@ fn refusals() {
             ]
             .concat(),
         )
+        .unwrap()
     };
     let odd = |bits: usize| {
         let mut modulus = vec![0x5A; bits.div_ceil(8)];
@@ -545,7 +511,9 @@ fn refusals() {
     }
     body[2] = 2;
     assert_eq!(
-        signature_of(&body).verify(&key_of(&encrypt_only), subject),
+        signature_of(&body)
+            .unwrap()
+            .verify(&key_of(&encrypt_only).unwrap(), subject),
         Err(VerifyError::UnsupportedAlgorithm)
     );
 
@@ -828,7 +796,7 @@ fn a_document_hashed_in_pieces() {
     ] {
         let mut changed = body.clone();
         changed[offset] = value;
-        let signature = signature_of(&changed);
+        let signature = signature_of(&changed).unwrap();
         assert_eq!(signature.document_hash().err(), Some(expected));
     }
 }

@@ -9,15 +9,14 @@ use ed25519_dalek::{Signer as _, SigningKey, Verifier as _, VerifyingKey};
 use num_bigint::BigUint;
 
 use super::{Ed25519Error, verify, verify_message};
-use crate::armor;
 use crate::hash::{Digest, HashAlgorithm};
 use crate::key::{KeyMaterial, PublicKey};
 use crate::packet::{self, Packet, Tag};
 use crate::signature::{Signature, SignatureMaterial, SignatureType};
 use crate::test_support::rfc9580::{A1_KEY, A2_SIGNATURE, A3_CERTIFICATE, A6_SIGNATURE, A6_TEXT};
 use crate::test_support::{
-    Json, Rng, digest, hashed_key, hashed_user_id, hex, signature_digest, signature_input, vector,
-    vector_bytes,
+    Json, Rng, dearmor, digest, hashed_key, hashed_user_id, hex, signature_digest, signature_input,
+    vector, vector_bytes,
 };
 
 /// The test vectors of RFC 8032 §7.1: the public key, the message, and the
@@ -432,11 +431,6 @@ fn check(signature: &Signature, key: &[u8; 32], data: &[u8]) {
         verify(key, &altered, &value),
         Err(Ed25519Error::BadSignature)
     );
-}
-
-/// The armored block's data.
-fn dearmor(armored: &str) -> Vec<u8> {
-    armor::decode(armored.as_bytes()).unwrap().into_data()
 }
 
 /// RFC 9580's version 4 sample: the EdDSALegacy signature of Appendix A.2

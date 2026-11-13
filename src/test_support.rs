@@ -6,7 +6,8 @@ use alloc::vec::Vec;
 use crate::hash::{
     Digest, HashAlgorithm, HashFunction, Sha1, Sha3_256, Sha3_512, Sha224, Sha256, Sha384, Sha512,
 };
-use crate::packet::Version;
+use crate::key::PublicKey;
+use crate::packet::{self, PacketError, Tag, Version};
 use crate::signature::Signature;
 
 /// Decodes a hexadecimal string.
@@ -19,6 +20,40 @@ pub(crate) fn hex(text: &str) -> Vec<u8> {
         .step_by(2)
         .map(|at| u8::from_str_radix(&text[at..at + 2], 16).expect("hex digit pair"))
         .collect()
+}
+
+/// The data of an armored block.
+pub(crate) fn dearmor(armored: &str) -> Vec<u8> {
+    crate::armor::decode(armored.as_bytes())
+        .unwrap()
+        .into_data()
+}
+
+/// The key a Public Key packet with `body` holds, the packet's header six
+/// octets long, so that the body's fields begin at offset 6: the version at
+/// 6, the creation time at 7, the algorithm at 11, and the material (or a
+/// version 6 key's material length) at 12.
+pub(crate) fn key_of(body: &[u8]) -> Result<PublicKey, PacketError> {
+    let data = forge::packet(Tag::PUBLIC_KEY, body);
+    PublicKey::from_packet(&packet::packets(&data).next().unwrap().unwrap())
+}
+
+/// The signature a Signature packet with `body` holds, the packet's header
+/// six octets long.
+pub(crate) fn signature_of(body: &[u8]) -> Result<Signature, PacketError> {
+    let data = forge::packet(Tag::SIGNATURE, body);
+    Signature::from_packet(&packet::packets(&data).next().unwrap().unwrap())
+}
+
+/// A multiprecision integer of `value`, its leading zero octets dropped and
+/// its length exact (RFC 9580 §3.2).
+pub(crate) fn mpi(value: &[u8]) -> Vec<u8> {
+    let value = &value[value.iter().take_while(|&&octet| octet == 0).count()..];
+    let bits = match value.first() {
+        Some(first) => value.len() * 8 - first.leading_zeros() as usize,
+        None => 0,
+    };
+    [&u16::try_from(bits).unwrap().to_be_bytes()[..], value].concat()
 }
 
 /// Reads a vendored test-vector file, named relative to `tests/vectors`.
@@ -494,7 +529,7 @@ pub(crate) mod forge {
     use ed25519_dalek::{Signer as _, SigningKey};
     use num_bigint::BigUint;
 
-    use super::{digest, hashed_key, hashed_user_id, hex};
+    use super::{digest, hashed_key, hashed_user_id, hex, mpi};
     use crate::cert::{self, Certificate};
     use crate::hash::HashAlgorithm;
     use crate::key::PublicKey;
@@ -530,7 +565,7 @@ pub(crate) mod forge {
 
     /// Where the fields of a version 4 or version 6 Signature packet's body
     /// lie, from its unhashed area on.
-    struct Layout {
+    pub(crate) struct Layout {
         /// The width of a subpacket area's length: two octets in version 4,
         /// four in version 6.
         width: usize,
@@ -538,14 +573,14 @@ pub(crate) mod forge {
         /// ends.
         unhashed: usize,
         /// Where the hash prefix begins, once the unhashed area ends.
-        prefix: usize,
+        pub(crate) prefix: usize,
         /// Where the material begins: after the hash prefix, and in version
         /// 6, the salt.
-        material: usize,
+        pub(crate) material: usize,
     }
 
     impl Layout {
-        fn of(body: &[u8]) -> Layout {
+        pub(crate) fn of(body: &[u8]) -> Layout {
             let width = match body[0] {
                 4 => 2,
                 6 => 4,
@@ -695,15 +730,6 @@ pub(crate) mod forge {
     }
 
     /// A multiprecision integer (RFC 9580 §3.2) of the big-endian `value`.
-    fn mpi(value: &[u8]) -> Vec<u8> {
-        let value = &value[value.iter().take_while(|&&octet| octet == 0).count()..];
-        let bits = match value.first() {
-            Some(first) => value.len() * 8 - first.leading_zeros() as usize,
-            None => 0,
-        };
-        [&u16::try_from(bits).unwrap().to_be_bytes()[..], value].concat()
-    }
-
     /// The modulus of the RSA test key, 2048 bits, generated with OpenSSL
     /// 3.6.4 for these tests.
     const RSA_MODULUS: &str = "\
@@ -731,7 +757,9 @@ pub(crate) mod forge {
     ";
 
     /// The DER prefix of an RSA signature's DigestInfo, as RFC 9580 Table 24
-    /// prints it.
+    /// prints it. Written out here from the RFC, rather than taken from the
+    /// library, so that a signature the forge makes does not depend on what
+    /// it tests.
     fn digest_info(algorithm: HashAlgorithm) -> &'static [u8] {
         match algorithm {
             HashAlgorithm::SHA1 => &[
@@ -766,7 +794,9 @@ pub(crate) mod forge {
         }
     }
 
-    /// The truncated DER encoding of the Ed25519Legacy curve's OID.
+    /// The truncated DER encoding of the Ed25519Legacy curve's OID (RFC 9580
+    /// §9.2), written out here from the RFC rather than taken from the
+    /// library, as [`digest_info`] is.
     const ED25519_LEGACY_OID: &[u8] = &[0x2B, 0x06, 0x01, 0x04, 0x01, 0xDA, 0x47, 0x0F, 0x01];
 
     /// A key's secret half.

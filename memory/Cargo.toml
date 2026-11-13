@@ -5,7 +5,8 @@ edition = "2024"
 publish = false
 description = "Holds what reading input allocates to the factors SECURITY.md states"
 
-[dependencies]
+# The library is the counting allocator alone; the test measures irongall.
+[dev-dependencies]
 irongall = { path = ".." }
 
 # A workspace of its own, so the counting allocator, and the `unsafe` it

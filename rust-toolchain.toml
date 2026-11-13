@@ -6,5 +6,5 @@
 #
 # This pin is a contributor convenience and sits ahead of the crate's minimum
 # supported Rust version, which is `rust-version` in Cargo.toml.
-channel = "1.99.1"
+channel = "1.100.0"
 components = ["rustfmt", "clippy"]

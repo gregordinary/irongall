@@ -6,7 +6,9 @@ use alloc::vec::Vec;
 use sha2::Digest as _;
 
 use super::sha3::{ROTATIONS, ROUND_CONSTANTS};
-use super::{HashFunction, Sha1, Sha3_256, Sha3_512, Sha224, Sha256, Sha384, Sha512};
+use super::{
+    Context, HashAlgorithm, HashFunction, Sha1, Sha3_256, Sha3_512, Sha224, Sha256, Sha384, Sha512,
+};
 use crate::test_support::{Rng, hex, vector};
 
 /// Checks every message in a CAVP short- or long-message file, at `file`
@@ -271,4 +273,47 @@ fn default_is_the_empty_state() {
     check::<Sha512>();
     check::<Sha3_256>();
     check::<Sha3_512>();
+}
+
+/// The table of what RFC 9580 gives of each hash algorithm agrees with the
+/// implementations: each digest is as long as the table says, names its
+/// algorithm, and has a DigestInfo whose DER lengths count it.
+#[test]
+fn descriptions_agree_with_the_implementations() {
+    let mut implemented = 0;
+    for description in &super::DESCRIPTIONS {
+        let algorithm = description.algorithm;
+        assert_eq!(
+            HashAlgorithm::from_text_name(description.text_name),
+            Some(algorithm)
+        );
+        let Some(context) = Context::new(algorithm) else {
+            assert_eq!(description.digest_info, None, "{algorithm}");
+            continue;
+        };
+        let digest = context.finalize();
+        assert_eq!(digest.algorithm(), algorithm);
+        assert_eq!(
+            Some(digest.as_bytes().len()),
+            algorithm.digest_length(),
+            "{algorithm}"
+        );
+        // SEQUENCE { AlgorithmIdentifier, OCTET STRING of the digest }.
+        let prefix = algorithm.digest_info_prefix().unwrap();
+        assert_eq!(prefix[0], 0x30, "{algorithm}");
+        assert_eq!(
+            usize::from(prefix[1]),
+            prefix.len() - 2 + description.digest_length,
+            "{algorithm}"
+        );
+        assert_eq!(
+            prefix[prefix.len() - 2..],
+            [0x04, u8::try_from(description.digest_length).unwrap()],
+            "{algorithm}"
+        );
+        implemented += 1;
+    }
+    assert_eq!(implemented, 7);
+    assert_eq!(HashAlgorithm(100).digest_length(), None);
+    assert_eq!(HashAlgorithm::from_text_name("sha256"), None);
 }

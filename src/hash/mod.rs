@@ -110,49 +110,152 @@ wire_number! {
     const SHA3_512 = 14, "SHA3-512";
 }
 
+/// What RFC 9580 gives of a hash algorithm it assigns (§9.5, Tables 23 and
+/// 24).
+#[derive(Debug)]
+struct Description {
+    algorithm: HashAlgorithm,
+    /// The length of its digest, in octets.
+    digest_length: usize,
+    /// The size of the salt a version 6 signature made with it carries, if
+    /// RFC 9580 gives one; a version 6 signature cannot use another.
+    v6_salt_size: Option<u8>,
+    /// Its name in a `Hash` armor header.
+    text_name: &'static str,
+    /// The DER encoding of an RSA signature's DigestInfo for it, up to the
+    /// digest, if irongall implements it.
+    digest_info: Option<&'static [u8]>,
+}
+
+/// Each hash algorithm RFC 9580 assigns, as it describes it: the one place
+/// a new algorithm's facts are written.
+const DESCRIPTIONS: [Description; 9] = [
+    Description {
+        algorithm: HashAlgorithm::MD5,
+        digest_length: 16,
+        v6_salt_size: None,
+        text_name: "MD5",
+        digest_info: None,
+    },
+    Description {
+        algorithm: HashAlgorithm::SHA1,
+        digest_length: 20,
+        v6_salt_size: None,
+        text_name: "SHA1",
+        digest_info: Some(&[
+            0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A, 0x05, 0x00, 0x04,
+            0x14,
+        ]),
+    },
+    Description {
+        algorithm: HashAlgorithm::RIPEMD160,
+        digest_length: 20,
+        v6_salt_size: None,
+        text_name: "RIPEMD160",
+        digest_info: None,
+    },
+    Description {
+        algorithm: HashAlgorithm::SHA256,
+        digest_length: 32,
+        v6_salt_size: Some(16),
+        text_name: "SHA256",
+        digest_info: Some(&[
+            0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x01, 0x05, 0x00, 0x04, 0x20,
+        ]),
+    },
+    Description {
+        algorithm: HashAlgorithm::SHA384,
+        digest_length: 48,
+        v6_salt_size: Some(24),
+        text_name: "SHA384",
+        digest_info: Some(&[
+            0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x02, 0x05, 0x00, 0x04, 0x30,
+        ]),
+    },
+    Description {
+        algorithm: HashAlgorithm::SHA512,
+        digest_length: 64,
+        v6_salt_size: Some(32),
+        text_name: "SHA512",
+        digest_info: Some(&[
+            0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x03, 0x05, 0x00, 0x04, 0x40,
+        ]),
+    },
+    Description {
+        algorithm: HashAlgorithm::SHA224,
+        digest_length: 28,
+        v6_salt_size: Some(16),
+        text_name: "SHA224",
+        digest_info: Some(&[
+            0x30, 0x2D, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x04, 0x05, 0x00, 0x04, 0x1C,
+        ]),
+    },
+    Description {
+        algorithm: HashAlgorithm::SHA3_256,
+        digest_length: 32,
+        v6_salt_size: Some(16),
+        text_name: "SHA3-256",
+        digest_info: Some(&[
+            0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x08, 0x05, 0x00, 0x04, 0x20,
+        ]),
+    },
+    Description {
+        algorithm: HashAlgorithm::SHA3_512,
+        digest_length: 64,
+        v6_salt_size: Some(32),
+        text_name: "SHA3-512",
+        digest_info: Some(&[
+            0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x0A, 0x05, 0x00, 0x04, 0x40,
+        ]),
+    },
+];
+
 impl HashAlgorithm {
+    /// What RFC 9580 gives of the algorithm, or `None` for one it does not
+    /// assign.
+    fn description(self) -> Option<&'static Description> {
+        DESCRIPTIONS
+            .iter()
+            .find(|description| description.algorithm == self)
+    }
+
     /// The length of the algorithm's digest in octets, or `None` for an
     /// algorithm RFC 9580 does not assign.
-    pub(crate) const fn digest_length(self) -> Option<usize> {
-        match self {
-            HashAlgorithm::MD5 => Some(16),
-            HashAlgorithm::SHA1 | HashAlgorithm::RIPEMD160 => Some(20),
-            HashAlgorithm::SHA224 => Some(28),
-            HashAlgorithm::SHA256 | HashAlgorithm::SHA3_256 => Some(32),
-            HashAlgorithm::SHA384 => Some(48),
-            HashAlgorithm::SHA512 | HashAlgorithm::SHA3_512 => Some(64),
-            _ => None,
-        }
+    pub(crate) fn digest_length(self) -> Option<usize> {
+        self.description()
+            .map(|description| description.digest_length)
     }
 
     /// The size of the salt a version 6 signature made with the algorithm
     /// carries (RFC 9580 §9.5), or `None` for an algorithm RFC 9580 gives no
     /// salt size, which a version 6 signature cannot use.
-    pub(crate) const fn v6_salt_size(self) -> Option<u8> {
-        match self {
-            HashAlgorithm::SHA256 | HashAlgorithm::SHA224 | HashAlgorithm::SHA3_256 => Some(16),
-            HashAlgorithm::SHA384 => Some(24),
-            HashAlgorithm::SHA512 | HashAlgorithm::SHA3_512 => Some(32),
-            _ => None,
-        }
+    pub(crate) fn v6_salt_size(self) -> Option<u8> {
+        self.description()
+            .and_then(|description| description.v6_salt_size)
     }
 
     /// The algorithm whose text name (RFC 9580 §9.5, Table 23) is `name`, as
     /// a `Hash` armor header lists it, or `None` for a name the table does
     /// not give. Names are matched exactly, case included.
     pub(crate) fn from_text_name(name: &str) -> Option<HashAlgorithm> {
-        Some(match name {
-            "MD5" => HashAlgorithm::MD5,
-            "SHA1" => HashAlgorithm::SHA1,
-            "RIPEMD160" => HashAlgorithm::RIPEMD160,
-            "SHA256" => HashAlgorithm::SHA256,
-            "SHA384" => HashAlgorithm::SHA384,
-            "SHA512" => HashAlgorithm::SHA512,
-            "SHA224" => HashAlgorithm::SHA224,
-            "SHA3-256" => HashAlgorithm::SHA3_256,
-            "SHA3-512" => HashAlgorithm::SHA3_512,
-            _ => return None,
-        })
+        DESCRIPTIONS
+            .iter()
+            .find(|description| description.text_name == name)
+            .map(|description| description.algorithm)
+    }
+
+    /// The DER encoding of an RSA signature's DigestInfo for the algorithm,
+    /// up to the digest itself (RFC 9580 §12.1.3, Table 24), or `None` for
+    /// one irongall does not implement.
+    pub(crate) fn digest_info_prefix(self) -> Option<&'static [u8]> {
+        self.description()
+            .and_then(|description| description.digest_info)
     }
 }
 
@@ -189,6 +292,19 @@ pub enum Digest {
 }
 
 impl Digest {
+    /// The algorithm that computed the digest.
+    pub(crate) fn algorithm(&self) -> HashAlgorithm {
+        match self {
+            Digest::Sha1(_) => HashAlgorithm::SHA1,
+            Digest::Sha224(_) => HashAlgorithm::SHA224,
+            Digest::Sha256(_) => HashAlgorithm::SHA256,
+            Digest::Sha384(_) => HashAlgorithm::SHA384,
+            Digest::Sha512(_) => HashAlgorithm::SHA512,
+            Digest::Sha3_256(_) => HashAlgorithm::SHA3_256,
+            Digest::Sha3_512(_) => HashAlgorithm::SHA3_512,
+        }
+    }
+
     /// The digest's bytes.
     pub fn as_bytes(&self) -> &[u8] {
         match self {

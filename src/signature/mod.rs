@@ -367,19 +367,10 @@ impl Signature {
         })
     }
 
-    /// Where an area's length begins, and how many octets it takes, in this
-    /// signature's version: the hashed area's length follows the four
-    /// octets of version and algorithms.
-    fn area_length_size(&self) -> usize {
-        match self.version {
-            Version::V4 => 2,
-            Version::V6 => 4,
-        }
-    }
-
-    /// The hashed area's subpackets, as octets.
+    /// The hashed area's subpackets, as octets: after the four octets of
+    /// version and algorithms, and the area's length.
     fn hashed_area(&self) -> &[u8] {
-        let start = 4_usize.saturating_add(self.area_length_size());
+        let start = 4_usize.saturating_add(area_length_width(self.version));
         self.body.get(start..self.hashed_end).unwrap_or_default()
     }
 
@@ -388,7 +379,9 @@ impl Signature {
         if !self.unhashed_read {
             return &[];
         }
-        let start = self.hashed_end.saturating_add(self.area_length_size());
+        let start = self
+            .hashed_end
+            .saturating_add(area_length_width(self.version));
         self.body.get(start..self.unhashed_end).unwrap_or_default()
     }
 
@@ -602,14 +595,26 @@ fn last(subpackets: Subpackets<'_>, subpacket_type: SubpacketType) -> Option<&[u
         .map(|subpacket| subpacket.body())
 }
 
-/// The next subpacket area: its length, in two octets in version 4 and four
-/// in version 6, then that many octets.
+/// How many octets a subpacket area's length takes in a signature of
+/// `version`: two in version 4, and four in version 6 (RFC 9580 §5.2.3).
+const fn area_length_width(version: Version) -> usize {
+    match version {
+        Version::V4 => 2,
+        Version::V6 => 4,
+    }
+}
+
+/// The next subpacket area: its length, big-endian in
+/// [`area_length_width`] octets, then that many octets.
 fn area<'a>(fields: &mut Fields<'a>, version: Version) -> Result<Fields<'a>, PacketError> {
-    let length = match version {
-        Version::V4 => usize::from(fields.u16()?),
-        Version::V6 => usize::try_from(fields.u32()?).unwrap_or(usize::MAX),
-    };
-    fields.split(length)
+    // At most four octets, so the value fits in 32 bits.
+    let length = fields
+        .take(area_length_width(version))?
+        .iter()
+        .fold(0_u32, |length, &octet| {
+            length.wrapping_shl(8) | u32::from(octet)
+        });
+    fields.split(usize::try_from(length).unwrap_or(usize::MAX))
 }
 
 /// Reads the algorithm-specific material of a signature (RFC 9580 §5.2.3.1 to

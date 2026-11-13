@@ -47,9 +47,11 @@ advisory names the reporter unless you ask otherwise.
   smallest of them is held in several times its size: a document, binary
   or armored, in at most 9 times its size, and a keyring in at most 22
   times its size once its certificates are a `Keyring`, and 44 times while
-  they are combined into one, as the list that gathers them grows. A panic, or memory or time that grows
-  faster than the input, is a vulnerability, since a verifier reads input
-  from whoever sends it.
+  they are combined into one, as the list that gathers them grows. Judging
+  a certificate, as `Keyring::verify` does the certificate of a key that
+  made a signature, allocates at most 6 times the certificate's size
+  besides. A panic, or memory or time that grows faster than the input, is
+  a vulnerability, since a verifier reads input from whoever sends it.
 - **An undocumented departure.** irongall reading or judging an input
   differently from RFC 9580 where the Conformance section of the crate
   documentation does not list the difference.

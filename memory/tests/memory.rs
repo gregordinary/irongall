@@ -2,7 +2,10 @@
 //! a 64-bit target: a document is held in at most [`DOCUMENT`] times its
 //! size, and a keyring in at most [`KEYRING`] times its size once it is a
 //! `Keyring`, and [`KEYRING_WHILE_COMBINED`] times while its certificates
-//! are combined into one.
+//! are combined into one. Judging a certificate read, as
+//! `Keyring::verify` does with the certificate of a key that made a
+//! signature, allocates at most [`JUDGEMENT`] times the certificate's size
+//! besides.
 //!
 //! Each case packs its input with the smallest of one thing a document or a
 //! keyring can hold many of: signatures, subpackets, embedded signatures,
@@ -16,6 +19,7 @@
 use std::process::ExitCode;
 
 use irongall::keyring::Keyring;
+use irongall::policy::{Authority, Policy};
 use irongall::{cert, document};
 use irongall_memory::{Counting, Measured};
 
@@ -35,15 +39,20 @@ const KEYRING: usize = 22;
 /// doubling, before it is held at its length.
 const KEYRING_WHILE_COMBINED: usize = 44;
 
+/// The most judging a certificate allocates, while it judges and once it
+/// has, as a multiple of the certificate's size.
+const JUDGEMENT: usize = 6;
+
 /// The power of two each case packs its input with that many of, or one
 /// more.
 const COUNT: usize = 1 << 15;
 
-/// What a case reads.
+/// What a case reads, or judges.
 #[derive(Clone, Copy)]
 enum Kind {
     Document,
     Keyring,
+    Judgement,
 }
 
 impl Kind {
@@ -53,6 +62,7 @@ impl Kind {
         match self {
             Kind::Document => (DOCUMENT, DOCUMENT),
             Kind::Keyring => (KEYRING, KEYRING_WHILE_COMBINED),
+            Kind::Judgement => (JUDGEMENT, JUDGEMENT),
         }
     }
 }
@@ -132,6 +142,31 @@ const CASES: &[Case] = &[
         Kind::Keyring,
         unread_certificate_signatures,
     ),
+    (
+        "one certificate's user IDs, judged",
+        Kind::Judgement,
+        judged_user_ids,
+    ),
+    (
+        "one certificate's smallest subkeys, judged",
+        Kind::Judgement,
+        judged_subkeys,
+    ),
+    (
+        "one certificate's smallest subkeys it may verify with, judged",
+        Kind::Judgement,
+        judged_verifiable_subkeys,
+    ),
+    (
+        "the smallest certifications of one user ID, judged",
+        Kind::Judgement,
+        judged_certifications,
+    ),
+    (
+        "the smallest certifications, after a user attribute, judged",
+        Kind::Judgement,
+        judged_unplaced_certifications,
+    ),
 ];
 
 fn main() -> ExitCode {
@@ -160,8 +195,9 @@ fn main() -> ExitCode {
     }
     if failed {
         eprintln!(
-            "reading held more than SECURITY.md states: a document {DOCUMENT} times its size, \
-             a keyring {KEYRING} times, and {KEYRING_WHILE_COMBINED} while it is combined"
+            "reading or judging held more than SECURITY.md states: a document {DOCUMENT} times \
+             its size, a keyring {KEYRING} times, and {KEYRING_WHILE_COMBINED} while it is \
+             combined, and judging a certificate {JUDGEMENT} times"
         );
         return ExitCode::FAILURE;
     }
@@ -467,4 +503,74 @@ fn unread_certificate_signatures(count: usize) -> (usize, Measured) {
     let (certificate, measured) = read_certificate(&input);
     assert_eq!(certificate.skipped().len(), count);
     (input.len(), measured)
+}
+
+/// A version 6 Ed25519 key packet of `tag`, created at `created`, which
+/// irongall verifies with: the public key of RFC 8032 §7.1's first test.
+fn ed25519_key(tag: u8, created: u32) -> Vec<u8> {
+    let mut body = vec![6];
+    body.extend_from_slice(&created.to_be_bytes());
+    body.extend_from_slice(&[27, 0, 0, 0, 32]);
+    body.extend_from_slice(&[
+        0xD7, 0x5A, 0x98, 0x01, 0x82, 0xB1, 0x0A, 0xB7, 0xD5, 0x4B, 0xFE, 0xD3, 0xC9, 0x64, 0x07,
+        0x3A, 0x0E, 0xE1, 0x72, 0xF3, 0xDA, 0xA6, 0x23, 0x25, 0xAF, 0x02, 0x1A, 0x68, 0xF7, 0x07,
+        0x51, 0x1A,
+    ]);
+    packet(tag, &body)
+}
+
+/// Judges the one certificate `input` holds, under a primary key irongall
+/// verifies with, and returns what judging it allocated: the certificate is
+/// read before the measure begins.
+fn judge(input: &[u8]) -> Measured {
+    let (certificate, _) = read_certificate(input);
+    let policy = Policy::new();
+    assert!(policy.accepts_key(certificate.primary()));
+    let (authority, measured) =
+        ALLOCATOR.measure(|| Authority::new(&certificate, &policy, u64::from(PRIMARY_CREATED)));
+    assert_eq!(authority.signers().count(), certificate.subkeys().len() + 1);
+    measured
+}
+
+fn judged_user_ids(count: usize) -> (usize, Measured) {
+    let mut input = ed25519_key(6, PRIMARY_CREATED);
+    for index in 0..count {
+        input.extend(user_id(index));
+    }
+    (input.len(), judge(&input))
+}
+
+/// The smallest subkeys of the primary key's version, 6, of an algorithm
+/// irongall does not read.
+fn judged_subkeys(count: usize) -> (usize, Measured) {
+    let mut input = ed25519_key(6, PRIMARY_CREATED);
+    for index in 0..count {
+        let mut body = vec![6];
+        body.extend_from_slice(&u32::try_from(index).unwrap().to_be_bytes());
+        body.extend_from_slice(&[100, 0, 0, 0, 0]);
+        input.extend(packet(14, &body));
+    }
+    (input.len(), judge(&input))
+}
+
+fn judged_verifiable_subkeys(count: usize) -> (usize, Measured) {
+    let mut input = ed25519_key(6, PRIMARY_CREATED);
+    for index in 0..count {
+        input.extend(ed25519_key(14, u32::try_from(index).unwrap()));
+    }
+    (input.len(), judge(&input))
+}
+
+fn judged_certifications(count: usize) -> (usize, Measured) {
+    let mut input = ed25519_key(6, PRIMARY_CREATED);
+    input.extend(packet(13, b"a"));
+    input.extend(packet(2, &smallest_signature(0x10)).repeat(count));
+    (input.len(), judge(&input))
+}
+
+fn judged_unplaced_certifications(count: usize) -> (usize, Measured) {
+    let mut input = ed25519_key(6, PRIMARY_CREATED);
+    input.extend(packet(17, b"a"));
+    input.extend(packet(2, &smallest_signature(0x10)).repeat(count));
+    (input.len(), judge(&input))
 }

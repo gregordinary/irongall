@@ -53,6 +53,10 @@ public API changes, since a verifier's verdicts are part of its contract.
   its size, and a keyring in at most 22 times once it is a `Keyring` and 44
   times while its certificates are combined into one, where 0.1.2 held them
   in up to 16, 28, and 56 times.
+- Judging a certificate allocates less: no list of its user IDs apart from
+  the certificate's own. It allocates at most 6 times the certificate's
+  size, where 0.1.2 allocated up to 13 times for a certificate packed with
+  user IDs. SECURITY.md states the factor, and the memory harness holds it.
 - A key is prepared for the arithmetic of verifying once for every
   signature checked with it: judging a certificate prepares its primary key
   once rather than for each of its statements, and a subkey once for the

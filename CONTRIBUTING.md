@@ -87,12 +87,14 @@ request.
 
 ## Memory
 
-`memory/` holds what reading input allocates to the factors SECURITY.md
-states. It reads input packed with the smallest of each thing a document or
-a keyring can hold many of, such as signatures, subpackets, armor headers,
-certificates, user IDs, and subkeys, under an allocator that counts the
-octets requested of it, and fails if what reading held, or the most it held
-at once, is more times the input's size than SECURITY.md states. Each case
+`memory/` holds what reading input, and judging a certificate read,
+allocate to the factors SECURITY.md states. It reads input packed with the
+smallest of each thing a document or a keyring can hold many of, such as
+signatures, subpackets, armor headers, certificates, user IDs, and
+subkeys, and judges certificates packed so, under an allocator that counts
+the octets requested of it, and fails if what reading or judging held, or
+the most it held at once, is more times the input's size than SECURITY.md
+states. Each case
 runs at a power of two and one past it, where a list that grows by doubling
 holds the most room it does not use.
 
@@ -167,7 +169,8 @@ and a case in `divergences.rs` that produces it.
   octets hashed and the public-key operations performed
   (`test_support::work`), so a bound is held by a test rather than a
   timing. Memory is linear in the input as well, and SECURITY.md states
-  how many times its size a document and a keyring are held in. What can
+  how many times its size a document and a keyring are held in, and how
+  many times a certificate's size judging it allocates. What can
   be read again from octets already held, such as a signature's subpackets
   or a key's material, is read from them on demand rather than held apart.
   A list whose members the input frames before they are read, such as a

@@ -189,21 +189,14 @@ impl<'a> Statements<'a> {
         displaced.extend(held(honored, unhonored).map(|statement| (statement, None)));
 
         let mut search = Search {
+            certificate,
             octets: length.saturating_mul(SEARCH_OCTETS),
             operations: count,
-            user_ids: certificate
-                .user_ids()
+            subkeys: statements
+                .subkeys
                 .iter()
                 .enumerate()
-                .map(|(index, user_id)| (Part::UserId(index), Over::UserId(user_id.value())))
-                .collect(),
-            subkeys: certificate
-                .subkeys()
-                .iter()
-                .zip(&statements.subkeys)
-                .enumerate()
-                .filter(|(_, (_, accepted))| accepted.is_some())
-                .map(|(index, (subkey, _))| (Part::Subkey(index), Over::Subkey(subkey.key())))
+                .filter_map(|(index, accepted)| accepted.is_some().then_some(index))
                 .collect(),
         };
         statements.unbounded = search
@@ -228,14 +221,15 @@ impl<'a> Statements<'a> {
 /// What is left of the bound on searching for the parts a certificate's
 /// signatures are over, and the parts each kind of statement may be over.
 struct Search<'a> {
+    certificate: &'a Certificate,
     /// The octets the search may still hash.
     octets: usize,
     /// The signatures it may still check by their equation.
     operations: usize,
-    /// Every user ID.
-    user_ids: Vec<(Part, Over<'a>)>,
-    /// Every subkey the policy accepts.
-    subkeys: Vec<(Part, Over<'a>)>,
+    /// The index of each subkey the policy accepts, the only ones a
+    /// statement is tried over. Every user ID is, so the certificate's own
+    /// list serves for them.
+    subkeys: Vec<usize>,
 }
 
 impl<'a> Search<'a> {
@@ -260,18 +254,31 @@ impl<'a> Search<'a> {
                 continue;
             }
             let kinds = statement_kinds(signature.signature_type()).unwrap_or_default();
-            let parts: &[(Part, Over<'a>)] = if kinds.contains(&SubjectKind::UserId) {
-                &self.user_ids
-            } else if kinds.contains(&SubjectKind::Subkey) {
-                &self.subkeys
-            } else {
-                &[]
-            };
+            let over_user_ids = kinds.contains(&SubjectKind::UserId);
+            let over_subkeys = !over_user_ids && kinds.contains(&SubjectKind::Subkey);
+            // Each list is taken whole or not at all, so a statement takes
+            // no step over the parts of a kind it is not over.
+            let user_ids = self.certificate.user_ids();
+            let user_ids = user_ids
+                .get(..if over_user_ids { user_ids.len() } else { 0 })
+                .unwrap_or_default();
+            let subkeys = self
+                .subkeys
+                .get(..if over_subkeys { self.subkeys.len() } else { 0 })
+                .unwrap_or_default();
+            let parts = user_ids
+                .iter()
+                .enumerate()
+                .map(|(index, user_id)| (Part::UserId(index), Over::UserId(user_id.value())))
+                .chain(subkeys.iter().filter_map(|&index| {
+                    let subkey = self.certificate.subkeys().get(index)?;
+                    Some((Part::Subkey(index), Over::Subkey(subkey.key())))
+                }));
             // A certification revocation is placed with a user ID or with
             // the primary key, and was tried over the primary key alone
             // either way, so the user IDs are what is left.
-            let candidates = parts.iter().filter(|&&(part, _)| Some(part) != tried);
-            for &(part, over) in candidates {
+            let candidates = parts.filter(|&(part, _)| Some(part) != tried);
+            for (part, over) in candidates {
                 let cost = checks.cost(signature, over).saturating_add(TRY_OVERHEAD);
                 self.octets = self.octets.checked_sub(cost)?;
                 let made = checks.made_by(signature, over);

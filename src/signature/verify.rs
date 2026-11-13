@@ -531,6 +531,30 @@ impl Over<'_> {
             Over::Subkey(_) => SubjectKind::Subkey,
         }
     }
+
+    /// Whether `other` is hashed as this part is: the same user ID, or a
+    /// subkey with the same packet body.
+    fn same(self, other: Over<'_>) -> bool {
+        match (self, other) {
+            (Over::Key, Over::Key) => true,
+            (Over::UserId(user_id), Over::UserId(other)) => user_id == other,
+            (Over::Subkey(subkey), Over::Subkey(other)) => subkey.body() == other.body(),
+            _ => false,
+        }
+    }
+
+    /// Hashes the part as a signature of `version` frames it, after the
+    /// primary key (RFC 9580 §5.2.4): nothing for the primary key alone.
+    fn hash(self, version: Version, context: &mut Context) -> Result<(), VerifyError> {
+        match self {
+            Over::Key => Ok(()),
+            Over::UserId(user_id) => hash_user_id(context, user_id),
+            Over::Subkey(subkey) => {
+                key::frame_for_hashing(version, subkey.body(), |data| context.update(data))
+                    .ok_or(VerifyError::BadSignature)
+            }
+        }
+    }
 }
 
 /// Whether the two octets of its hash a signature carries, its hash prefix,
@@ -560,22 +584,38 @@ pub(crate) enum Prefix {
 /// several of its parts, and every statement over each part: a version 4
 /// signature hashes nothing before the primary key, so the key is hashed here
 /// once for each hash algorithm, and each check hashes only what follows it.
-/// The key is prepared for its arithmetic once, too, for every equation.
+/// The statements placed with one part are checked one after another, so
+/// for version 4 the part is hashed once for each hash algorithm too,
+/// however many statements are placed with it. The key is prepared for its
+/// arithmetic once, for every equation.
 #[derive(Debug)]
 pub(crate) struct PrimaryChecks<'k> {
     primary: Verifier<'k>,
     /// The primary key framed as a version 4 signature frames it, under each
-    /// hash algorithm a version 4 statement has been checked over so far,
-    /// or the reason no such statement verifies: a hash algorithm irongall
-    /// does not implement, or a key too long for the framing.
-    hashed: Vec<(HashAlgorithm, Result<Context, VerifyError>)>,
+    /// hash algorithm a version 4 statement has been checked over so far.
+    hashed: Hashed,
+    /// The part, a user ID or a subkey, that the last statement checked
+    /// where it is placed was checked over, and the primary key with that
+    /// part framed as a version 4 signature frames them, under each hash
+    /// algorithm, as `hashed` holds the primary key alone. A version 4 key
+    /// may write its integers with leading zero octets, so a subkey
+    /// irongall verifies with may be as long as 16 KB, where its integers
+    /// need about one.
+    part: Option<(Over<'k>, Hashed)>,
 }
+
+/// What a version 4 signature hashes before what follows its subject's
+/// first part, under each hash algorithm hashed with so far, or the reason
+/// no signature over it verifies: a hash algorithm irongall does not
+/// implement, or a key too long for the framing.
+type Hashed = Vec<(HashAlgorithm, Result<Context, VerifyError>)>;
 
 impl<'k> PrimaryChecks<'k> {
     pub(crate) fn new(primary: &'k PublicKey) -> PrimaryChecks<'k> {
         PrimaryChecks {
             primary: Verifier::new(primary),
             hashed: Vec::new(),
+            part: None,
         }
     }
 
@@ -606,9 +646,9 @@ impl<'k> PrimaryChecks<'k> {
     pub(crate) fn made_by(
         &mut self,
         signature: &Signature,
-        over: Over<'_>,
+        over: Over<'k>,
     ) -> Result<(), VerifyError> {
-        let (value, digest) = self.digest(signature, over)?;
+        let (value, digest) = self.digest(signature, over, false)?;
         signature.check_digest(&mut self.primary, value, &digest)
     }
 
@@ -620,41 +660,50 @@ impl<'k> PrimaryChecks<'k> {
     /// No signature covers the prefix, so anyone who handles a certificate
     /// can change it, and a statement whose equation holds is its key's
     /// whatever its prefix says. This is the check of a statement over the
-    /// part it is placed with, of which there is one for each statement.
+    /// part it is placed with, of which there is one for each statement, and
+    /// for version 4 it hashes the part once for each hash algorithm while
+    /// the statements it checks are over the same part.
     pub(crate) fn made_by_equation(
         &mut self,
         signature: &Signature,
-        over: Over<'_>,
+        over: Over<'k>,
     ) -> Result<Prefix, VerifyError> {
-        let (value, digest) = self.digest(signature, over)?;
+        let (value, digest) = self.digest(signature, over, true)?;
         check_equation(self.primary.prepared()?, value, &digest)?;
         Ok(signature.prefix_of(&digest))
     }
 
     /// The material of `signature` as the primary key's algorithm reads it,
     /// and the hash it would be made over were it over `over`, once the
-    /// primary key may have made it over a part of that kind.
+    /// primary key may have made it over a part of that kind. `placed` is
+    /// whether the part is the one the signature is placed with, whose
+    /// hashing a version 4 signature takes from
+    /// [`hashed_part`](Self::hashed_part).
     fn digest<'s>(
         &mut self,
         signature: &'s Signature,
-        over: Over<'_>,
+        over: Over<'k>,
+        placed: bool,
     ) -> Result<(Value<'s>, Digest), VerifyError> {
         signature.check_subject(over.kind())?;
         let primary = self.primary.key();
         let value = signature.check_key(primary)?;
-        let mut context = match signature.version {
-            Version::V4 => self.hashed_primary(signature.hash_algorithm)?,
-            Version::V6 => {
+        let algorithm = signature.hash_algorithm;
+        let context = match (signature.version, over) {
+            (Version::V4, Over::Key) => self.hashed_primary(algorithm)?,
+            (Version::V4, _) if placed => self.hashed_part(algorithm, over)?,
+            (Version::V4, _) => {
+                let mut context = self.hashed_primary(algorithm)?;
+                over.hash(Version::V4, &mut context)?;
+                context
+            }
+            (Version::V6, _) => {
                 let mut context = signature.context()?;
                 signature.hash_key(&mut context, primary)?;
+                over.hash(Version::V6, &mut context)?;
                 context
             }
         };
-        match over {
-            Over::Key => {}
-            Over::UserId(user_id) => hash_user_id(&mut context, user_id)?,
-            Over::Subkey(subkey) => signature.hash_key(&mut context, subkey)?,
-        }
         Ok((value, signature.trailed(context)))
     }
 
@@ -704,6 +753,33 @@ impl<'k> PrimaryChecks<'k> {
                 Ok(context)
             });
         self.hashed.push((algorithm, hashed.clone()));
+        hashed
+    }
+
+    /// A context under `algorithm` that has hashed the primary key and
+    /// `over`, a user ID or a subkey, as a version 4 signature frames them,
+    /// hashed once for each algorithm while the part is the same.
+    fn hashed_part(
+        &mut self,
+        algorithm: HashAlgorithm,
+        over: Over<'k>,
+    ) -> Result<Context, VerifyError> {
+        if let Some((held, hashed)) = &self.part
+            && held.same(over)
+        {
+            if let Some((_, hashed)) = hashed.iter().find(|(held, _)| *held == algorithm) {
+                return hashed.clone();
+            }
+        } else {
+            self.part = Some((over, Vec::new()));
+        }
+        let hashed = self.hashed_primary(algorithm).and_then(|mut context| {
+            over.hash(Version::V4, &mut context)?;
+            Ok(context)
+        });
+        if let Some((_, held)) = &mut self.part {
+            held.push((algorithm, hashed.clone()));
+        }
         hashed
     }
 }

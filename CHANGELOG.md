@@ -74,6 +74,12 @@ public API changes, since a verifier's verdicts are part of its contract.
   first. A version 6 primary key is hashed for each statement, and one
   irongall refuses may be about 16 KB long, so judging such a certificate
   could hash 184 octets for each octet of its signatures.
+- Judging a version 4 certificate hashes the primary key with each user ID
+  or subkey once for each hash algorithm of the statements placed with it,
+  rather than once for each statement. A version 4 key may write its
+  integers with leading zero octets, so a subkey irongall verifies with may
+  be over 16 KB long, and judging a certificate that held one could hash
+  820 octets for each octet of its signatures.
 
 ## [0.1.2] - 2026-11-10
 

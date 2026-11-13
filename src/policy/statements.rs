@@ -250,7 +250,7 @@ impl<'a> Search<'a> {
     /// are.
     fn attribute(
         &mut self,
-        checks: &mut PrimaryChecks<'_>,
+        checks: &mut PrimaryChecks<'a>,
         statements: &mut Statements<'a>,
         displaced: Vec<Displaced<'a>>,
     ) -> Option<()> {

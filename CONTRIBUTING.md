@@ -157,9 +157,10 @@ and a case in `divergences.rs` that produces it.
 - **Bounded work.** A length read from input is checked against the bytes
   remaining before anything is allocated for it. Parsing is linear in its
   input and never recurses on its structure. Judging is linear too: a
-  subject hashed once for each signature over it, such as a user ID or a
-  subkey, is bounded in size before any of those signatures is verified,
-  and work that would otherwise multiply two parts of the input, such as
+  subject hashed for each signature over it, such as a user ID, a subkey,
+  or a version 6 primary key, is bounded in size before any of those
+  signatures is verified, or hashed once for all of them, and work that
+  would otherwise multiply two parts of the input, such as
   trying each of a certificate's signatures over each of its parts, is
   bounded by the size of the input and refuses once the bound is reached,
   rather than pass over what it did not reach. The unit tests count the

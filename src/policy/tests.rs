@@ -1564,6 +1564,50 @@ fn an_unverifiable_primary_key_is_refused_before_its_statements_are_hashed() {
     );
 }
 
+/// A version 4 key may write its integers with leading zero octets, so a
+/// subkey irongall verifies with may be over 16 KB long. Checked where they
+/// are placed, the statements over it hash it once for their hash
+/// algorithm, not once each.
+#[test]
+fn a_long_subkey_is_hashed_once_for_the_statements_over_it() {
+    let primary = ed25519(1);
+    let rsa = Key::rsa(Version::V4, CREATED);
+    let KeyMaterial::Rsa { modulus, exponent } = rsa.public().material() else {
+        panic!("an RSA key");
+    };
+    // 65535 bits, the most a length can state.
+    let padded = |value: &[u8]| [&[0xFF, 0xFF][..], &vec![0; 8192 - value.len()], value].concat();
+    let body = [
+        &[4][..],
+        &CREATED.to_be_bytes(),
+        &[1],
+        &padded(modulus),
+        &padded(exponent),
+    ]
+    .concat();
+    let subkey = Key::with_body(&rsa, &body);
+    let length = subkey.public().body().len();
+    assert!(length > 16_000);
+    assert!(Policy::new().accepts_key(subkey.public()));
+    let mut packets = vec![
+        primary.primary(),
+        forge::user_id(USER_ID),
+        certification(&primary, CREATED, Some(CERTIFY | SIGN), None),
+        subkey.subkey(),
+    ];
+    for day in 0..50 {
+        packets.push(binding(&primary, &subkey, CREATED + day * DAY, SIGN));
+    }
+    let packets: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
+    let certificate = forge::certificate(&packets);
+    let (judged, work) = work::of(|| standings(&certificate, NOW));
+    assert_eq!(judged[1], Ok(window(CREATED, None)));
+    // Once for the bindings, and once for the governing binding's
+    // back-signature, which the subkey made.
+    assert_eq!(work.operations, 52);
+    assert!(work.hashed < 3 * length as u64, "{work:?}");
+}
+
 /// Judging a certificate prepares its primary key for the arithmetic of
 /// its equations once, however many statements it checks, and a subkey once
 /// for all the back-signatures its bindings embed.

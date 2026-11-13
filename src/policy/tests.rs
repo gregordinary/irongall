@@ -3378,8 +3378,20 @@ fn a_recent_self_signature_over_a_weak_hash_refuses_its_certificate() {
         verdict(&with(&[]), &[&document]),
         Err(Reason::AfterKeyExpiration)
     );
-    // A newer one made the second before the date lifts its expiration.
-    assert!(verdict(&with(&[&newer(FEBRUARY_2023 - 1)]), &[&document]).is_ok());
+    // A newer one made the second before the date lifts its expiration,
+    // unless the policy holds old self-signatures to its hashes too; then it
+    // refuses the certificate, unless the policy also accepts SHA-1.
+    let old = with(&[&newer(FEBRUARY_2023 - 1)]);
+    assert!(verdict(&old, &[&document]).is_ok());
+    let strict = Policy::new().with_old_self_signature_hashes(false);
+    assert!(Policy::new().accepts_old_self_signature_hashes());
+    assert!(!strict.accepts_old_self_signature_hashes());
+    assert_eq!(
+        judge(&old, &[&document], &strict, NOW),
+        Err(Reason::WeakSelfSignature)
+    );
+    let strict_accepting = strict.clone().with_hash(HashAlgorithm::SHA1, true);
+    assert!(judge(&old, &[&document], &strict_accepting, NOW).is_ok());
     // One made at the date refuses the certificate.
     let recent = with(&[&newer(FEBRUARY_2023)]);
     assert_eq!(
@@ -3430,12 +3442,15 @@ fn a_recent_self_signature_over_a_weak_hash_refuses_its_certificate() {
         judge(&certificate, &[&document], &accepting, NOW),
         Err(Reason::MissingSelfSignature)
     );
+    let old = with(&[&fresh, &withdrawal(FEBRUARY_2023 - 1)]);
     assert_eq!(
-        verdict(
-            &with(&[&fresh, &withdrawal(FEBRUARY_2023 - 1)]),
-            &[&document]
-        ),
+        verdict(&old, &[&document]),
         Err(Reason::MissingSelfSignature)
+    );
+    // Held to the policy's hashes, an old one is weak too.
+    assert_eq!(
+        judge(&old, &[&document], &strict, NOW),
+        Err(Reason::WeakSelfSignature)
     );
     // A key revocation over SHA-1 made at the date revokes.
     let revocation = sha1(SignatureType::KEY_REVOCATION, FEBRUARY_2023).over_key(&primary);
@@ -3448,17 +3463,23 @@ fn a_recent_self_signature_over_a_weak_hash_refuses_its_certificate() {
     for version in [Version::V4, Version::V6] {
         let primary = Key::ed25519(1, version, CREATED);
         let refusing = Policy::new().with_hash(HashAlgorithm::SHA256, false);
-        let lapse = |created: u32| {
+        let lapse = |created: u32, policy: &Policy| {
             let direct = primary
                 .sign(SignatureType::DIRECT_KEY, created)
                 .key_flags(CERTIFY | SIGN)
                 .over_key(&primary);
             let certificate = forge::certificate(&[&primary.primary(), &direct]);
-            Authority::new(&certificate, &refusing, NOW).lapse()
+            Authority::new(&certificate, policy, NOW).lapse()
         };
-        assert_eq!(lapse(FEBRUARY_2023 - 1), Ok(None), "{version:?}");
+        assert_eq!(lapse(FEBRUARY_2023 - 1, &refusing), Ok(None), "{version:?}");
         assert_eq!(
-            lapse(FEBRUARY_2023),
+            lapse(FEBRUARY_2023, &refusing),
+            Err(Reason::WeakSelfSignature),
+            "{version:?}"
+        );
+        let strict = refusing.clone().with_old_self_signature_hashes(false);
+        assert_eq!(
+            lapse(FEBRUARY_2023 - 1, &strict),
             Err(Reason::WeakSelfSignature),
             "{version:?}"
         );

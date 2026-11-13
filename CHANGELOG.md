@@ -17,6 +17,12 @@ public API changes, since a verifier's verdicts are part of its contract.
   intended recipients is refused over a document.
 - `packet::Version::number`, the octet a version is on the wire, as each
   wire number's `number` gives it.
+- `policy::Policy::with_old_self_signature_hashes` and
+  `Policy::accepts_old_self_signature_hashes`. A policy may hold the
+  self-signatures and certification revocations made before 1 February
+  2023 to the hashes it accepts, as RFC 9580 §9.5 recommends, rather than
+  accept them over any hash on which their key's signatures verify, SHA-1
+  among them. The default is unchanged.
 
 ### Changed
 

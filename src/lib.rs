@@ -156,7 +156,8 @@
 //!   hash refuses its subkey. A certification revocation is held to the same
 //!   date, since withdrawing a self-signature can lift a restriction. What
 //!   the exception risks, a chosen-prefix collision, the [`policy`] module
-//!   sets out.
+//!   sets out. A policy may refuse the exception, as §9.5 recommends
+//!   ([`Policy::with_old_self_signature_hashes`](policy::Policy::with_old_self_signature_hashes)).
 //! - **Ed25519 signatures over a short hash**, one under 256 bits, never
 //!   verify, as RFC 9580 §5.2.3.3 and §5.2.3.4 require; GnuPG makes and
 //!   verifies them. A certificate's own statement made so is still its

@@ -148,7 +148,10 @@
 //! before then. RFC 9580 §9.5 forbids validating a recent signature that
 //! depends on SHA-1, and discourages validating an old one. The date is the
 //! one from which Sequoia's standard policy refuses SHA-1 in a
-//! self-signature.
+//! self-signature. A policy may hold older self-signatures and certification
+//! revocations to its hashes too, as §9.5 recommends
+//! ([`Policy::with_old_self_signature_hashes`]): a certificate self-signed
+//! over SHA-1 alone then grants nothing, unless the policy accepts SHA-1.
 //!
 //! The risk the exception leaves is a chosen-prefix collision, by which a
 //! key holder who certified another party's key over SHA-1 also certified,
@@ -217,9 +220,11 @@ use statements::{Statement, Statements};
 /// - The hash algorithms SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA3-256,
 ///   and SHA3-512. SHA-1, MD5, and RIPEMD-160 are refused: collisions
 ///   against all three are within reach, and a signature binds its signer
-///   only to its digest. A self-signature over a primary key made before
-///   1 February 2023 may rest on any hash on which its key's signatures
-///   verify (see the [module documentation](self)).
+///   only to its digest.
+/// - A self-signature over a primary key made before 1 February 2023, or a
+///   certification revocation made before then, over any hash on which its
+///   key's signatures verify, SHA-1 among them
+///   ([`accepts_old_self_signature_hashes`](Policy::accepts_old_self_signature_hashes)).
 /// - Every key irongall verifies with ([`Policy::accepts_key`]): RSA keys of
 ///   2048 bits or more, the narrowest RFC 9580 §12.4 permits verifying with,
 ///   and Ed25519 keys.
@@ -237,6 +242,7 @@ pub struct Policy {
     fresh: bool,
     clock_skew: u64,
     text_signatures: bool,
+    old_self_signature_hashes: bool,
 }
 
 impl Default for Policy {
@@ -266,6 +272,7 @@ impl Policy {
             fresh: true,
             clock_skew: 30 * 60,
             text_signatures: true,
+            old_self_signature_hashes: true,
         }
     }
 
@@ -385,6 +392,33 @@ impl Policy {
         self
     }
 
+    /// Whether a self-signature over the primary key made before 1 February
+    /// 2023, or a certification revocation made before then, grants or
+    /// withdraws over any hash on which its key's signatures verify, as well
+    /// as over those the policy accepts. A self-signature made since must
+    /// rest on a hash the policy accepts either way.
+    ///
+    /// Many keys in use, archive signing keys among them, were self-signed
+    /// over SHA-1 alone before then, and GnuPG accepts them. RFC 9580 §9.5
+    /// recommends not validating such a signature (see the [module
+    /// documentation](self)).
+    pub fn accepts_old_self_signature_hashes(&self) -> bool {
+        self.old_self_signature_hashes
+    }
+
+    /// The policy with old self-signatures held to the hashes the policy
+    /// accepts, or not: see
+    /// [`accepts_old_self_signature_hashes`](Self::accepts_old_self_signature_hashes).
+    ///
+    /// Refused, a certificate whose governing self-signature rests on SHA-1
+    /// is refused as [`Reason::WeakSelfSignature`], unless the policy
+    /// accepts SHA-1.
+    #[must_use]
+    pub fn with_old_self_signature_hashes(mut self, accepted: bool) -> Policy {
+        self.old_self_signature_hashes = accepted;
+        self
+    }
+
     /// Whether a signature may rest on `key`: a key irongall verifies with,
     /// and if it is an RSA key, one at least
     /// [`rsa_minimum_bits`](Self::rsa_minimum_bits) wide.
@@ -423,9 +457,11 @@ impl Policy {
     /// states, or a certification revocation withdraw one, as far as its
     /// hash goes: one made before [`SELF_SIGNATURE_HASHES_FROM`] whatever
     /// hash it rests on, if no shorter than its public-key algorithm allows,
-    /// and one made since only if the policy accepts its hash too.
+    /// unless the policy holds old self-signatures to its hashes, and one
+    /// made since only if the policy accepts its hash too.
     fn accepts_self_signature_hash(&self, signature: &Signature) -> bool {
-        if signature.creation_time() < SELF_SIGNATURE_HASHES_FROM {
+        if self.old_self_signature_hashes && signature.creation_time() < SELF_SIGNATURE_HASHES_FROM
+        {
             !signature.hash_too_short()
         } else {
             self.accepts_hash_of(signature)
@@ -482,8 +518,8 @@ impl fmt::Debug for Hashes {
 
 /// 1 February 2023, in seconds since the Unix epoch: a self-signature over
 /// the primary key made from then on must rest on a hash the policy accepts,
-/// and one made earlier may rest on any (see the [module
-/// documentation](self)).
+/// and one made earlier may rest on any, unless the policy holds it to its
+/// hashes too (see the [module documentation](self)).
 const SELF_SIGNATURE_HASHES_FROM: u32 = 1_675_209_600;
 
 /// When a key's signatures are accepted: those made from when its authority
@@ -572,8 +608,9 @@ pub enum Reason {
     /// A self-signature that governs the certificate's primary key, or a
     /// certification revocation that withdraws one, rests on a hash on which
     /// a self-signature may not grant: one shorter than its public-key
-    /// algorithm allows, or, if it was made on or after 1 February 2023, one
-    /// the policy does not accept (see the [module documentation](self)).
+    /// algorithm allows, or one the policy does not accept, if it was made on
+    /// or after 1 February 2023 or the policy holds older ones to its hashes
+    /// too (see the [module documentation](self)).
     WeakSelfSignature,
     /// The certificate is of version 6 and has no direct-key signature in
     /// force (RFC 9580 §5.2.3.10).

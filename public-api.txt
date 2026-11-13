@@ -707,6 +707,7 @@ pub struct irongall::policy::Policy
 impl irongall::policy::Policy
 pub fn irongall::policy::Policy::accepts_hash(&self, irongall::hash::HashAlgorithm) -> bool
 pub fn irongall::policy::Policy::accepts_key(&self, &irongall::key::PublicKey) -> bool
+pub fn irongall::policy::Policy::accepts_old_self_signature_hashes(&self) -> bool
 pub fn irongall::policy::Policy::accepts_text_signatures(&self) -> bool
 pub fn irongall::policy::Policy::clock_skew(&self) -> u64
 pub fn irongall::policy::Policy::max_signatures(&self) -> usize
@@ -717,6 +718,7 @@ pub fn irongall::policy::Policy::with_clock_skew(self, u64) -> irongall::policy:
 pub fn irongall::policy::Policy::with_fresh_signatures(self, bool) -> irongall::policy::Policy
 pub fn irongall::policy::Policy::with_hash(self, irongall::hash::HashAlgorithm, bool) -> irongall::policy::Policy
 pub fn irongall::policy::Policy::with_max_signatures(self, usize) -> irongall::policy::Policy
+pub fn irongall::policy::Policy::with_old_self_signature_hashes(self, bool) -> irongall::policy::Policy
 pub fn irongall::policy::Policy::with_rsa_minimum_bits(self, usize) -> irongall::policy::Policy
 pub fn irongall::policy::Policy::with_text_signatures(self, bool) -> irongall::policy::Policy
 impl core::default::Default for irongall::policy::Policy

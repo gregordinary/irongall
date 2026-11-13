@@ -88,8 +88,8 @@ request.
 ## Memory
 
 `memory/` holds what reading input allocates to the factors SECURITY.md
-states. It reads input packed with the smallest of each thing irongall holds
-in a structure of its own, such as signatures, subpackets, armor headers,
+states. It reads input packed with the smallest of each thing a document or
+a keyring can hold many of, such as signatures, subpackets, armor headers,
 certificates, user IDs, and subkeys, under an allocator that counts the
 octets requested of it, and fails if what reading held, or the most it held
 at once, is more times the input's size than SECURITY.md states. Each case
@@ -166,11 +166,13 @@ and a case in `divergences.rs` that produces it.
   octets hashed and the public-key operations performed
   (`test_support::work`), so a bound is held by a test rather than a
   timing. Memory is linear in the input as well, and SECURITY.md states
-  how many times its size a document and a keyring are held in. A list
-  whose members the input frames before they are read, such as a
-  document's signatures or a signature's subpackets, is counted before
-  anything is allocated for it; one gathered while reading, such as a
-  certificate's user IDs, is held at its length once complete. The memory
+  how many times its size a document and a keyring are held in. What can
+  be read again from octets already held, such as a signature's subpackets
+  or a key's material, is read from them on demand rather than held apart.
+  A list whose members the input frames before they are read, such as a
+  document's signatures or a signature's embedded signatures, is counted
+  before anything is allocated for it; one gathered while reading, such as
+  a certificate's user IDs, is held at its length once complete. The memory
   harness holds the factors SECURITY.md states (see [Memory](#memory)).
 - **No constant-time code, and no claim of it.** Everything a verification
   computes over is public: the key, the signature, and the signed data. That

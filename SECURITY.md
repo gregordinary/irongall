@@ -39,13 +39,15 @@ advisory names the reporter unless you ask otherwise.
 - **Panics and unbounded work on hostile input.** The library is written not
   to panic, to allocate nothing its input does not account for, and to do
   work and hold memory linear in its input. Each certificate, user ID,
-  subkey, signature, subpacket, and armor header is held in a structure of
-  its own, larger than the smallest packet or line that encodes it. So on a
-  64-bit target, input packed with the smallest of them is held in several
-  times its size: a document, binary or armored, in at most 16 times its
-  size, and a keyring in at most 28 times its size once its certificates
-  are a `Keyring`, and 56 times while they are combined into one, as the
-  list that gathers them grows. A panic, or memory or time that grows
+  subkey, and signature is held in a structure of its own, larger than the
+  smallest packet that encodes it, as is the reason for each packet passed
+  over; a signature's subpackets and material, a key's material, and an
+  armored block's headers are read again from the octets they were read
+  from rather than held apart. So on a 64-bit target, input packed with the
+  smallest of them is held in several times its size: a document, binary
+  or armored, in at most 9 times its size, and a keyring in at most 22
+  times its size once its certificates are a `Keyring`, and 44 times while
+  they are combined into one, as the list that gathers them grows. A panic, or memory or time that grows
   faster than the input, is a vulnerability, since a verifier reads input
   from whoever sends it.
 - **An undocumented departure.** irongall reading or judging an input

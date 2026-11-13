@@ -33,6 +33,13 @@ public API changes, since a verifier's verdicts are part of its contract.
   compared equal.
 - The `Debug` forms of `Signature` and `PublicKey` show what their accessors
   read, and not the octets of the body.
+- Reading holds less memory. A signature holds its body and reads its
+  subpackets, salt, and material from it, a key reads its material from its
+  packet's body, and an armored block holds its headers as the lines they
+  were read from. On a 64-bit target, a document is held in at most 9 times
+  its size, and a keyring in at most 22 times once it is a `Keyring` and 44
+  times while its certificates are combined into one, where 0.1.2 held them
+  in up to 16, 28, and 56 times.
 
 ## [0.1.2] - 2026-11-10
 

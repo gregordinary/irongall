@@ -4,8 +4,8 @@
 //! `Keyring`, and [`KEYRING_WHILE_COMBINED`] times while its certificates
 //! are combined into one.
 //!
-//! Each case packs its input with the smallest of one thing irongall holds
-//! in a structure of its own: signatures, subpackets, embedded signatures,
+//! Each case packs its input with the smallest of one thing a document or a
+//! keyring can hold many of: signatures, subpackets, embedded signatures,
 //! armor headers, certificates, user IDs, subkeys, and the signatures over
 //! each part of a certificate. Each runs at a power of two and one past it,
 //! since a list that grows by doubling holds the most room it does not use
@@ -24,16 +24,16 @@ static ALLOCATOR: Counting = Counting::new();
 
 /// The most a document, binary or armored, is held in while it is read and
 /// once it is, as a multiple of its size.
-const DOCUMENT: usize = 16;
+const DOCUMENT: usize = 9;
 
 /// The most a keyring is held in once its certificates are a `Keyring`, as
 /// a multiple of its size.
-const KEYRING: usize = 28;
+const KEYRING: usize = 22;
 
 /// The most a keyring is held in while its certificates are combined into a
 /// `Keyring`, as a multiple of its size: the list that gathers them grows by
 /// doubling, before it is held at its length.
-const KEYRING_WHILE_COMBINED: usize = 56;
+const KEYRING_WHILE_COMBINED: usize = 44;
 
 /// The power of two each case packs its input with that many of, or one
 /// more.

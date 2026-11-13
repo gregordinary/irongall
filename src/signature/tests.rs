@@ -140,12 +140,12 @@ fn rfc_9580_version_4_signature() {
     );
     assert_eq!(
         signature.material(),
-        &SignatureMaterial::Ed25519(native.try_into().unwrap())
+        SignatureMaterial::Ed25519(native.try_into().unwrap())
     );
     let issuer = KeyId::from_bytes(hex("8cfde12197965a9a").try_into().unwrap());
     assert_eq!(signature.issuer_key_ids().collect::<Vec<_>>(), [issuer]);
     assert_eq!(signature.issuer_fingerprints().count(), 0);
-    let [unhashed] = signature.unhashed_subpackets() else {
+    let [unhashed] = signature.unhashed_subpackets().collect::<Vec<_>>()[..] else {
         panic!("one unhashed subpacket");
     };
     assert_eq!(unhashed.subpacket_type(), SubpacketType::ISSUER_KEY_ID);
@@ -189,7 +189,6 @@ fn rfc_9580_version_6_signatures() {
     assert_eq!(direct.issuer_key_ids().count(), 0);
     let hashed: Vec<_> = direct
         .hashed_subpackets()
-        .iter()
         .map(|subpacket| (subpacket.subpacket_type().number(), subpacket.is_critical()))
         .collect();
     assert_eq!(
@@ -205,10 +204,10 @@ fn rfc_9580_version_6_signatures() {
             (39, false),
         ]
     );
-    assert!(direct.unhashed_subpackets().is_empty());
+    assert!(direct.unhashed_subpackets().next().is_none());
     assert_eq!(
         direct.material(),
-        &SignatureMaterial::Ed25519(
+        SignatureMaterial::Ed25519(
             hex(
                 "4585b3b903b0127ec4fda2f023045a2ec76bcb4f9571a9651e14aee1137a1d66\
                  8442c88f951e33c4ffd33fb9a17d511eed758fc6d9cc50cb5fd793b2039d5804"
@@ -243,7 +242,7 @@ fn subpacket_lengths_in_each_encoding() {
         let encoded = subpacket(26, &vec![b'u'; length - 1]);
         assert_eq!(encoded.len(), header + length, "{length}");
         let signature = parse(&v4(&[created(), encoded].concat(), &[])).unwrap();
-        let policy = &signature.hashed_subpackets()[1];
+        let policy = signature.hashed_subpackets().nth(1).unwrap();
         assert_eq!(policy.subpacket_type(), SubpacketType::POLICY_URI);
         assert_eq!(policy.body().len(), length - 1, "{length}");
     }
@@ -293,8 +292,8 @@ fn typed_subpackets_read_the_last_in_the_hashed_area() {
         signature.issuer_fingerprints().collect::<Vec<_>>(),
         [Fingerprint::V4([0x44; 20]), Fingerprint::V4([0x55; 20])]
     );
-    assert_eq!(signature.hashed_subpackets().len(), 10);
-    assert_eq!(signature.unhashed_subpackets().len(), 3);
+    assert_eq!(signature.hashed_subpackets().count(), 10);
+    assert_eq!(signature.unhashed_subpackets().count(), 3);
 
     // Subpackets only in the unhashed area are not read as the signature's.
     let unhashed = [
@@ -462,7 +461,10 @@ fn critical_subpackets_must_be_honored() {
         let result = parse(&v4(&[created(), critical.clone()].concat(), &[]));
         if honored.contains(&number) {
             let signature = result.unwrap();
-            assert!(signature.hashed_subpackets()[1].is_critical(), "{number}");
+            assert!(
+                signature.hashed_subpackets().nth(1).unwrap().is_critical(),
+                "{number}"
+            );
         } else {
             let error = result.unwrap_err();
             assert_eq!(
@@ -610,10 +612,7 @@ fn version_6_salts() {
     }
     let signature = parse(&v6(&created(), &[])).unwrap();
     assert_eq!(signature.version(), Version::V6);
-    assert_eq!(
-        signature.material(),
-        &SignatureMaterial::Ed25519([0x11; 64])
-    );
+    assert_eq!(signature.material(), SignatureMaterial::Ed25519([0x11; 64]));
     assert_eq!(signature.hashed_fields(), &v6(&created(), &[])[..14]);
 
     // A salt of the wrong size, and hash algorithms version 6 cannot use.
@@ -633,15 +632,14 @@ fn version_6_salts() {
 fn material() {
     let read = |version: u8, algorithm: u8, material: &[u8]| {
         parse(&body(version, 0, algorithm, 8, &created(), &[], material))
-            .map(|signature| signature.material().clone())
     };
     // An RSA value: version 4 tolerates an overstated length and drops the
     // leading zeros, version 6 does not.
     let overstated = [0x00, 0x10, 0x00, 0xC5];
     for algorithm in [1, 2, 3] {
         assert_eq!(
-            read(4, algorithm, &overstated).unwrap(),
-            SignatureMaterial::Rsa(vec![0xC5])
+            read(4, algorithm, &overstated).unwrap().material(),
+            SignatureMaterial::Rsa(&[0xC5])
         );
     }
     assert_eq!(
@@ -649,8 +647,8 @@ fn material() {
         PacketErrorKind::InvalidMpi
     );
     assert_eq!(
-        read(6, 1, &[0x00, 0x08, 0xC5]).unwrap(),
-        SignatureMaterial::Rsa(vec![0xC5])
+        read(6, 1, &[0x00, 0x08, 0xC5]).unwrap().material(),
+        SignatureMaterial::Rsa(&[0xC5])
     );
 
     // EdDSALegacy's R and S, each restored to 32 octets: here R's native
@@ -662,23 +660,34 @@ fn material() {
     native[3..32].fill(0x22);
     native[32..].fill(0x33);
     assert_eq!(
-        read(4, 22, &legacy).unwrap(),
+        read(4, 22, &legacy).unwrap().material(),
         SignatureMaterial::Ed25519(native)
     );
     // Longer than 32 octets, as on Ed448Legacy: another curve.
     let ed448 = [&[0x01, 0xC7][..], &[0x44; 57], &[0x01, 0xC7], &[0x44; 57]].concat();
-    assert_eq!(read(4, 22, &ed448).unwrap(), SignatureMaterial::Opaque);
+    assert_eq!(
+        read(4, 22, &ed448).unwrap().material(),
+        SignatureMaterial::Opaque
+    );
     // RFC 9580 §5.2.3.3.1 forbids EdDSALegacy in version 6.
-    assert_eq!(read(6, 22, &legacy).unwrap(), SignatureMaterial::Opaque);
+    assert_eq!(
+        read(6, 22, &legacy).unwrap().material(),
+        SignatureMaterial::Opaque
+    );
 
     // Algorithms irongall does not verify with, known or not.
     for algorithm in [17, 19, 28, 100] {
         assert_eq!(
-            read(4, algorithm, &[0x00, 0x01, 0x01, 0x00, 0x01, 0x01]).unwrap(),
+            read(4, algorithm, &[0x00, 0x01, 0x01, 0x00, 0x01, 0x01])
+                .unwrap()
+                .material(),
             SignatureMaterial::Opaque
         );
     }
-    assert_eq!(read(4, 17, &[]).unwrap(), SignatureMaterial::Opaque);
+    assert_eq!(
+        read(4, 17, &[]).unwrap().material(),
+        SignatureMaterial::Opaque
+    );
 }
 
 /// How a part of a signature that no signature covers is written refuses
@@ -706,10 +715,7 @@ fn how_an_uncovered_part_is_written_refuses_only_an_honored_reading() {
                 (error.kind(), error.offset()),
                 (PacketErrorKind::TrailingData, at)
             );
-            assert_eq!(
-                unhonored.material(),
-                &SignatureMaterial::Ed25519([0x11; 64])
-            );
+            assert_eq!(unhonored.material(), SignatureMaterial::Ed25519([0x11; 64]));
             assert_eq!(unhonored.length(), body.len());
         }
     }
@@ -730,7 +736,7 @@ fn how_an_uncovered_part_is_written_refuses_only_an_honored_reading() {
             refused.then_some(PacketErrorKind::InvalidMpi),
             "{version} {material:02X?}"
         );
-        assert_eq!(unhonored.material(), &SignatureMaterial::Rsa(vec![0xC5]));
+        assert_eq!(unhonored.material(), SignatureMaterial::Rsa(&[0xC5]));
     }
     // EdDSALegacy's R, of 32 octets, with its top bit uncounted.
     let r = [&[0xC0][..], &[0x22; 31]].concat();
@@ -739,7 +745,7 @@ fn how_an_uncovered_part_is_written_refuses_only_an_honored_reading() {
     assert_eq!(honored.unwrap_err().kind(), PacketErrorKind::InvalidMpi);
     let mut native = [0x33; 64];
     native[..32].copy_from_slice(&r);
-    assert_eq!(unhonored.material(), &SignatureMaterial::Ed25519(native));
+    assert_eq!(unhonored.material(), SignatureMaterial::Ed25519(native));
 }
 
 #[test]
@@ -758,10 +764,9 @@ fn embedded_signatures_are_read_one_level_deep() {
             embedded.signature_type(),
             SignatureType::PRIMARY_KEY_BINDING
         );
-        assert_eq!(embedded.material(), &SignatureMaterial::Ed25519([0x22; 64]));
+        assert_eq!(embedded.material(), SignatureMaterial::Ed25519([0x22; 64]));
         let raw = binding
             .hashed_subpackets()
-            .iter()
             .chain(binding.unhashed_subpackets())
             .find(|subpacket| subpacket.subpacket_type() == SubpacketType::EMBEDDED_SIGNATURE)
             .unwrap();
@@ -785,7 +790,10 @@ fn embedded_signatures_are_read_one_level_deep() {
         panic!("one embedded signature");
     };
     assert!(embedded.embedded_signatures().is_empty());
-    assert_eq!(embedded.unhashed_subpackets()[0].body(), [0xFF; 3]);
+    assert_eq!(
+        embedded.unhashed_subpackets().next().unwrap().body(),
+        [0xFF; 3]
+    );
     let nested = body(
         4,
         0x19,
@@ -839,4 +847,17 @@ fn formatting() {
         error.to_string(),
         "Signature packet, offset 10: a signature without a creation time in its hashed subpackets"
     );
+}
+
+/// Two signatures are equal when their bodies are, octet for octet: the same
+/// material written with two bit counts makes two signatures.
+#[test]
+fn signatures_are_equal_when_their_bodies_are() {
+    let read = |material: &[u8]| parse(&body(4, 0, 1, 8, &created(), &[], material)).unwrap();
+    let nine = read(&[0x00, 0x09, 0x00, 0xC5]);
+    let sixteen = read(&[0x00, 0x10, 0x00, 0xC5]);
+    assert_eq!(nine.material(), sixteen.material());
+    assert_eq!(nine.length(), sixteen.length());
+    assert_ne!(nine, sixteen);
+    assert_eq!(nine, read(&[0x00, 0x09, 0x00, 0xC5]));
 }

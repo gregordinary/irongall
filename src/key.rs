@@ -38,7 +38,6 @@
 //! 5 take their fingerprints differently, so irongall cannot name them.
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use core::fmt;
 
 use crate::hash::{HashFunction as _, Sha1, Sha256};
@@ -79,21 +78,21 @@ wire_number! {
 }
 
 /// A key's public material, for the algorithms irongall verifies with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum KeyMaterial {
+pub enum KeyMaterial<'a> {
     /// An RSA key, of any of the three RSA algorithms.
     Rsa {
         /// The modulus n, big-endian, without leading zeros.
-        modulus: Vec<u8>,
+        modulus: &'a [u8],
         /// The public exponent e, big-endian, without leading zeros.
-        exponent: Vec<u8>,
+        exponent: &'a [u8],
     },
     /// An Ed25519 key, in its native 32-octet encoding (RFC 8032 §5.1.5).
     ///
     /// An Ed25519 key carries the encoding as it is; an EdDSALegacy key over
     /// Ed25519Legacy carries it as a prefixed native point.
-    Ed25519([u8; 32]),
+    Ed25519(&'a [u8; 32]),
     /// Material irongall does not read: an algorithm it does not verify with,
     /// or a curve it does not know. The key has a fingerprint, and verifies
     /// nothing.
@@ -105,16 +104,18 @@ pub enum KeyMaterial {
 const ED25519_LEGACY_OID: &[u8] = &[0x2B, 0x06, 0x01, 0x04, 0x01, 0xDA, 0x47, 0x0F, 0x01];
 
 /// A public key: the content of a Public Key or Public Subkey packet.
+///
+/// A key holds its packet's body, and its material is read from that on
+/// demand. Two keys are equal when their bodies are, octet for octet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKey {
-    version: Version,
-    creation_time: u32,
-    algorithm: PublicKeyAlgorithm,
-    material: KeyMaterial,
-    fingerprint: Fingerprint,
     /// The packet's body, which a signature over the key hashes (RFC 9580
-    /// §5.2.4).
+    /// §5.2.4), and which the material is read from.
     body: Box<[u8]>,
+    fingerprint: Fingerprint,
+    creation_time: u32,
+    version: Version,
+    algorithm: PublicKeyAlgorithm,
 }
 
 impl PublicKey {
@@ -129,43 +130,15 @@ impl PublicKey {
         if packet.tag() != Tag::PUBLIC_KEY && packet.tag() != Tag::PUBLIC_SUBKEY {
             return Err(packet.error(PacketErrorKind::UnexpectedType));
         }
-        let mut fields = packet.fields();
-        let at = fields.offset();
-        let version = match fields.u8()? {
-            4 => Version::V4,
-            6 => Version::V6,
-            _ => return Err(fields.error_at(PacketErrorKind::UnsupportedVersion, at)),
-        };
-        let creation_time = fields.u32()?;
-        let algorithm = PublicKeyAlgorithm(fields.u8()?);
-        let material = match version {
-            Version::V4 => read_material(&mut fields, algorithm, version)?,
-            Version::V6 => {
-                // A failure to fit the material to its stated length, either
-                // way, is the length's.
-                let fit = |error: PacketError| match error.kind() {
-                    PacketErrorKind::TruncatedBody | PacketErrorKind::TrailingData => {
-                        error.with_kind(PacketErrorKind::MaterialLength)
-                    }
-                    _ => error,
-                };
-                let length = usize::try_from(fields.u32()?).unwrap_or(usize::MAX);
-                let mut material = fields.split(length).map_err(fit)?;
-                let read = read_material(&mut material, algorithm, version).map_err(fit)?;
-                material.finish().map_err(fit)?;
-                read
-            }
-        };
-        fields.finish()?;
+        let (version, creation_time, algorithm, _) = read(packet.fields())?;
         let fingerprint = Fingerprint::of(version, packet.body())
             .ok_or_else(|| packet.error(PacketErrorKind::KeyTooLong))?;
         Ok(PublicKey {
-            version,
-            creation_time,
-            algorithm,
-            material,
-            fingerprint,
             body: packet.body().into(),
+            fingerprint,
+            creation_time,
+            version,
+            algorithm,
         })
     }
 
@@ -185,8 +158,9 @@ impl PublicKey {
     }
 
     /// The key's material.
-    pub fn material(&self) -> &KeyMaterial {
-        &self.material
+    pub fn material(&self) -> KeyMaterial<'_> {
+        // Read when the key was, so this does not fail.
+        read(Fields::of(&self.body)).map_or(KeyMaterial::Opaque, |(.., material)| material)
     }
 
     /// The key's fingerprint.
@@ -205,22 +179,62 @@ impl PublicKey {
     }
 }
 
+/// Reads a key packet's body: its version, creation time, algorithm, and
+/// material (RFC 9580 §5.5.2).
+fn read(
+    mut fields: Fields<'_>,
+) -> Result<(Version, u32, PublicKeyAlgorithm, KeyMaterial<'_>), PacketError> {
+    let at = fields.offset();
+    let version = match fields.u8()? {
+        4 => Version::V4,
+        6 => Version::V6,
+        _ => return Err(fields.error_at(PacketErrorKind::UnsupportedVersion, at)),
+    };
+    let creation_time = fields.u32()?;
+    let algorithm = PublicKeyAlgorithm(fields.u8()?);
+    let material = match version {
+        Version::V4 => read_material(&mut fields, algorithm, version)?,
+        Version::V6 => {
+            // A failure to fit the material to its stated length, either
+            // way, is the length's.
+            let fit = |error: PacketError| match error.kind() {
+                PacketErrorKind::TruncatedBody | PacketErrorKind::TrailingData => {
+                    error.with_kind(PacketErrorKind::MaterialLength)
+                }
+                _ => error,
+            };
+            let length = usize::try_from(fields.u32()?).unwrap_or(usize::MAX);
+            let mut material = fields.split(length).map_err(fit)?;
+            let read = read_material(&mut material, algorithm, version).map_err(fit)?;
+            material.finish().map_err(fit)?;
+            read
+        }
+    };
+    fields.finish()?;
+    Ok((version, creation_time, algorithm, material))
+}
+
 /// Reads the algorithm-specific material of a key (RFC 9580 §5.5.5), up to
 /// the end of `fields`.
-fn read_material(
-    fields: &mut Fields<'_>,
+fn read_material<'a>(
+    fields: &mut Fields<'a>,
     algorithm: PublicKeyAlgorithm,
     version: Version,
-) -> Result<KeyMaterial, PacketError> {
+) -> Result<KeyMaterial<'a>, PacketError> {
     match algorithm {
         PublicKeyAlgorithm::RSA
         | PublicKeyAlgorithm::RSA_ENCRYPT_ONLY
         | PublicKeyAlgorithm::RSA_SIGN_ONLY => {
-            let modulus = fields.mpi(version)?.to_vec();
-            let exponent = fields.mpi(version)?.to_vec();
+            let modulus = fields.mpi(version)?;
+            let exponent = fields.mpi(version)?;
             Ok(KeyMaterial::Rsa { modulus, exponent })
         }
-        PublicKeyAlgorithm::ED25519 => Ok(KeyMaterial::Ed25519(fields.array()?)),
+        PublicKeyAlgorithm::ED25519 => {
+            let at = fields.offset();
+            <&[u8; 32]>::try_from(fields.take(32)?)
+                .map(KeyMaterial::Ed25519)
+                .map_err(|_| fields.error_at(PacketErrorKind::InvalidMaterial, at))
+        }
         PublicKeyAlgorithm::EDDSA_LEGACY if version == Version::V4 => read_eddsa_legacy(fields),
         _ => {
             fields.rest();
@@ -230,7 +244,7 @@ fn read_material(
 }
 
 /// Reads an EdDSALegacy key's curve and point (RFC 9580 §5.5.5.5).
-fn read_eddsa_legacy(fields: &mut Fields<'_>) -> Result<KeyMaterial, PacketError> {
+fn read_eddsa_legacy<'a>(fields: &mut Fields<'a>) -> Result<KeyMaterial<'a>, PacketError> {
     let oid_length = fields.u8()?;
     // Lengths 0 and 0xFF are reserved for extensions RFC 9580 does not
     // define, so the field's format is unknown, as is any curve but one.
@@ -245,7 +259,7 @@ fn read_eddsa_legacy(fields: &mut Fields<'_>) -> Result<KeyMaterial, PacketError
     // A prefixed native point (RFC 9580 §11.2.2): 0x40, then the native
     // encoding.
     match fields.mpi(Version::V4)? {
-        [0x40, native @ ..] => <[u8; 32]>::try_from(native)
+        [0x40, native @ ..] => <&[u8; 32]>::try_from(native)
             .map(KeyMaterial::Ed25519)
             .map_err(|_| fields.error_at(PacketErrorKind::InvalidMaterial, at)),
         _ => Err(fields.error_at(PacketErrorKind::InvalidMaterial, at)),
@@ -457,7 +471,7 @@ mod tests {
         let point = hex("3f098994bdd916ed4053197934e4a87c80733a1280d62f8010992e43ee3b2406");
         assert_eq!(
             key.material(),
-            &KeyMaterial::Ed25519(point.try_into().unwrap())
+            KeyMaterial::Ed25519(&point.try_into().unwrap())
         );
         assert_eq!(
             key.fingerprint().to_string(),
@@ -475,7 +489,7 @@ mod tests {
         let native = hex("f94da7bb48d60a61e567706a6587d0331999bb9d891a08242ead84543df895a3");
         assert_eq!(
             primary.material(),
-            &KeyMaterial::Ed25519(native.try_into().unwrap())
+            KeyMaterial::Ed25519(&native.try_into().unwrap())
         );
         assert_eq!(
             primary.fingerprint().to_string(),
@@ -484,7 +498,7 @@ mod tests {
         assert_eq!(primary.key_id().to_string(), "CB186C4F0609A697");
 
         assert_eq!(subkey.algorithm(), PublicKeyAlgorithm::X25519);
-        assert_eq!(subkey.material(), &KeyMaterial::Opaque);
+        assert_eq!(subkey.material(), KeyMaterial::Opaque);
         assert_eq!(
             subkey.fingerprint().to_string(),
             "12C83F1E706F6308FE151A417743A1F033790E93E9978488D1DB378DA9930885"
@@ -498,9 +512,9 @@ mod tests {
         let key = parse(&body(4, 1, &material)).unwrap();
         assert_eq!(
             key.material(),
-            &KeyMaterial::Rsa {
-                modulus: [0xC5].to_vec(),
-                exponent: [0x01, 0x00, 0x01].to_vec(),
+            KeyMaterial::Rsa {
+                modulus: &[0xC5],
+                exponent: &[0x01, 0x00, 0x01],
             }
         );
         for algorithm in [2, 3] {
@@ -522,13 +536,13 @@ mod tests {
     #[test]
     fn ed25519_material() {
         let key = parse(&body(4, 27, &[0x11; 32])).unwrap();
-        assert_eq!(key.material(), &KeyMaterial::Ed25519([0x11; 32]));
+        assert_eq!(key.material(), KeyMaterial::Ed25519(&[0x11; 32]));
         let key = parse(&body(6, 27, &[0x11; 32])).unwrap();
-        assert_eq!(key.material(), &KeyMaterial::Ed25519([0x11; 32]));
+        assert_eq!(key.material(), KeyMaterial::Ed25519(&[0x11; 32]));
 
         let point = [&[0x40][..], &[0x22; 32]].concat();
         let key = parse(&body(4, 22, &eddsa_legacy(&point))).unwrap();
-        assert_eq!(key.material(), &KeyMaterial::Ed25519([0x22; 32]));
+        assert_eq!(key.material(), KeyMaterial::Ed25519(&[0x22; 32]));
     }
 
     #[test]
@@ -549,11 +563,7 @@ mod tests {
             (6, 22, &eddsa_legacy(&[&[0x40][..], &[0x22; 32]].concat())),
         ] {
             let key = parse(&body(version, algorithm, material)).unwrap();
-            assert_eq!(
-                key.material(),
-                &KeyMaterial::Opaque,
-                "{version} {algorithm}"
-            );
+            assert_eq!(key.material(), KeyMaterial::Opaque, "{version} {algorithm}");
         }
     }
 

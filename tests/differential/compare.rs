@@ -333,7 +333,6 @@ fn signature(
     // Embedded Signature subpacket, hashed area first.
     let embedded_body = irongall
         .hashed_subpackets()
-        .iter()
         .chain(irongall.unhashed_subpackets())
         .find(|subpacket| subpacket.subpacket_type() == SubpacketType::EMBEDDED_SIGNATURE)
         .map(|subpacket| subpacket.body().to_vec());
@@ -464,7 +463,6 @@ fn same_key(
 fn hashed_count(signature: &irongall::signature::Signature, kind: SubpacketType) -> usize {
     signature
         .hashed_subpackets()
-        .iter()
         .filter(|subpacket| subpacket.subpacket_type() == kind)
         .count()
 }
@@ -594,7 +592,7 @@ fn same_signature(
 /// Checks that the two read the same signature material, of a signature
 /// naming `algorithm`.
 fn same_material(
-    ours: &SignatureMaterial,
+    ours: SignatureMaterial<'_>,
     theirs: Option<&SignatureBytes>,
     algorithm: PublicKeyAlgorithm,
 ) -> Result<(), Disagreement> {
@@ -609,7 +607,7 @@ fn same_material(
         }
         (SignatureMaterial::Rsa(value), Some(SignatureBytes::Mpis(mpis))) => same(
             "an RSA signature",
-            vec![&value[..]],
+            vec![value],
             mpis.iter().map(AsRef::as_ref).collect(),
         ),
         (SignatureMaterial::Ed25519(encoding), Some(SignatureBytes::Mpis(mpis))) => {

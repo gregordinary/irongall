@@ -106,8 +106,11 @@ fn listed(listing: &str) -> Vec<Listed> {
 }
 
 /// The subpackets of an area as GnuPG lists them.
-fn as_listed(subpackets: &[Subpacket], hashed: bool) -> impl Iterator<Item = ListedSubpacket> {
-    subpackets.iter().map(move |subpacket| ListedSubpacket {
+fn as_listed<'a>(
+    subpackets: impl Iterator<Item = Subpacket<'a>>,
+    hashed: bool,
+) -> impl Iterator<Item = ListedSubpacket> {
+    subpackets.map(move |subpacket| ListedSubpacket {
         hashed,
         critical: subpacket.is_critical(),
         number: subpacket.subpacket_type().number(),

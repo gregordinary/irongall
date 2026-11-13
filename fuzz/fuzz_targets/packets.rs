@@ -28,9 +28,8 @@ fn check_signature(packet: &Packet<'_>, input_len: usize) {
     assert_eq!(signature.salt().is_empty(), signature.version() == Version::V4);
     let created = signature
         .hashed_subpackets()
-        .iter()
-        .rev()
-        .find(|subpacket| subpacket.subpacket_type() == SubpacketType::SIGNATURE_CREATION_TIME)
+        .filter(|subpacket| subpacket.subpacket_type() == SubpacketType::SIGNATURE_CREATION_TIME)
+        .last()
         .expect("a hashed creation time");
     assert_eq!(created.body(), signature.creation_time().to_be_bytes());
     for embedded in signature.embedded_signatures() {

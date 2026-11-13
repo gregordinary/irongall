@@ -56,8 +56,10 @@
 //! at its end, such as a form feed, is part of what is signed.
 
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
+use core::iter::FusedIterator;
 
 use crate::base64::{self, Base64Error, Decoder};
 use crate::hash::HashAlgorithm;
@@ -105,40 +107,29 @@ impl fmt::Display for Label {
 }
 
 /// An armor header: a `Key: Value` line between the header line and the data.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Header {
-    key: Box<str>,
-    value: Box<str>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Header<'a> {
+    key: &'a str,
+    value: &'a str,
 }
 
-impl Header {
+impl<'a> Header<'a> {
     /// The key, such as `Comment`.
-    pub fn key(&self) -> &str {
-        &self.key
+    pub fn key(&self) -> &'a str {
+        self.key
     }
 
     /// The value, which may be empty.
-    pub fn value(&self) -> &str {
-        &self.value
+    pub fn value(&self) -> &'a str {
+        self.value
     }
 
-    /// Reads a header from a line whose trailing whitespace is already gone:
-    /// see [`split`](Self::split).
-    fn parse(line: &[u8]) -> Option<Header> {
-        let (key, value) = Header::split(line)?;
-        Some(Header {
-            key: Box::from(key),
-            value: Box::from(value),
-        })
-    }
-
-    /// The key and the value of a header line whose trailing whitespace is
-    /// already gone, or `None` if the line is not a header.
+    /// Reads a header from a line whose trailing whitespace is already gone.
     ///
     /// The key is one or more printable ASCII characters other than a colon.
     /// A colon and a space separate it from the value, which is UTF-8; an
     /// empty value may drop the space.
-    fn split(line: &[u8]) -> Option<(&str, &str)> {
+    fn parse(line: &[u8]) -> Option<Header<'_>> {
         let mut parts = line.splitn(2, |&byte| byte == b':');
         let key = parts.next()?;
         let rest = parts.next()?;
@@ -150,15 +141,15 @@ impl Header {
         if key.is_empty() || !key.iter().all(u8::is_ascii_graphic) {
             return None;
         }
-        Some((
-            core::str::from_utf8(key).ok()?,
-            core::str::from_utf8(value).ok()?,
-        ))
+        Some(Header {
+            key: core::str::from_utf8(key).ok()?,
+            value: core::str::from_utf8(value).ok()?,
+        })
     }
 
     /// Whether the header is a `Hash` header.
     fn is_hash(&self) -> bool {
-        &*self.key == "Hash"
+        self.key == "Hash"
     }
 
     /// Whether a `Hash` header's value is what RFC 9580 §6.2.2.3 allows: a
@@ -176,7 +167,9 @@ impl Header {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Armor {
     label: Label,
-    headers: Box<[Header]>,
+    /// The armor header lines, as read, each ended by an LF, which no line
+    /// holds.
+    headers: Box<str>,
     data: Box<[u8]>,
 }
 
@@ -192,8 +185,10 @@ impl Armor {
     /// The armor headers, in the order they appear.
     ///
     /// No signature covers them.
-    pub fn headers(&self) -> &[Header] {
-        &self.headers
+    pub fn headers(&self) -> Headers<'_> {
+        Headers {
+            lines: self.headers.split_terminator('\n'),
+        }
     }
 
     /// The decoded data.
@@ -206,6 +201,30 @@ impl Armor {
         self.data.into_vec()
     }
 }
+
+/// The armor headers of an [`Armor`], in the order they appear: see
+/// [`Armor::headers`].
+#[derive(Debug, Clone)]
+pub struct Headers<'a> {
+    lines: core::str::SplitTerminator<'a, char>,
+}
+
+impl<'a> Iterator for Headers<'a> {
+    type Item = Header<'a>;
+
+    fn next(&mut self) -> Option<Header<'a>> {
+        let header = Header::parse(self.lines.next()?.as_bytes());
+        // Each line was read as a header when the block was decoded, so this
+        // is not reached; the headers end rather than go on past a line that
+        // does not read.
+        if header.is_none() {
+            self.lines = "".split_terminator('\n');
+        }
+        header
+    }
+}
+
+impl FusedIterator for Headers<'_> {}
 
 /// Decodes an input holding exactly one armored block.
 ///
@@ -223,7 +242,7 @@ impl Armor {
 /// ";
 /// let armor = armor::decode(input)?;
 /// assert_eq!(armor.label(), Label::Signature);
-/// assert_eq!(armor.headers()[0].key(), "Comment");
+/// assert_eq!(armor.headers().next().map(|header| header.key()), Some("Comment"));
 /// assert_eq!(armor.data(), b"foobar");
 /// # Ok::<(), armor::ArmorError>(())
 /// ```
@@ -538,18 +557,19 @@ impl<'a> Reader<'a> {
         Some(line)
     }
 
-    /// How many of the lines that follow are armor headers, up to the first
-    /// that is not one, read ahead without moving past them.
-    fn count_headers(&self) -> usize {
+    /// How many octets the armor headers that follow take as an
+    /// [`Armor`] holds them, each line with an LF, up to the first line that
+    /// is not one, read ahead without moving past them.
+    fn header_length(&self) -> usize {
         let mut ahead = self.clone();
-        let mut count: usize = 0;
+        let mut length: usize = 0;
         while let Some(line) = ahead.next_line() {
-            if Header::split(line).is_none() {
+            if Header::parse(line).is_none() {
                 break;
             }
-            count = count.saturating_add(1);
+            length = length.saturating_add(line.len()).saturating_add(1);
         }
-        count
+        length
     }
 
     /// An error on the line read last.
@@ -593,8 +613,8 @@ impl<'a> Reader<'a> {
 
     /// Reads the rest of a block whose header line was read last.
     fn read_block(&mut self, label: Label) -> Result<Armor, ArmorError> {
-        // Counted first, so that the headers are allocated for once.
-        let mut headers = Vec::with_capacity(self.count_headers());
+        // Measured first, so that the headers are allocated for once.
+        let mut headers = String::with_capacity(self.header_length());
         // The data's first line, when it follows the header line directly.
         let mut first_data_line = None;
         loop {
@@ -609,7 +629,11 @@ impl<'a> Reader<'a> {
                     if header.is_hash() && !header.is_conformant_hash() {
                         return Err(self.at_line(ArmorErrorKind::InvalidHashHeader));
                     }
-                    headers.push(header);
+                    // A line that reads as a header is UTF-8 throughout.
+                    let line = core::str::from_utf8(line)
+                        .map_err(|_| self.at_line(ArmorErrorKind::InvalidHeader))?;
+                    headers.push_str(line);
+                    headers.push('\n');
                 }
                 // A header holds a colon, and base64 data cannot, so in a block
                 // without headers such a line is the data, with the blank line
@@ -650,7 +674,7 @@ impl<'a> Reader<'a> {
         let data = data.finish().map_err(|error| self.at_line(error.into()))?;
         Ok(Armor {
             label,
-            headers: headers.into_boxed_slice(),
+            headers: headers.into_boxed_str(),
             data: data.into_boxed_slice(),
         })
     }
@@ -744,7 +768,7 @@ mod tests {
     fn rfc_9580_samples() {
         let key = decode(A1_KEY.as_bytes()).unwrap();
         assert_eq!(key.label(), Label::PublicKey);
-        assert!(key.headers().is_empty());
+        assert_eq!(key.headers().count(), 0);
         assert_eq!(key.data(), hex(A1_KEY_PACKET));
 
         let signature = decode(A2_SIGNATURE.as_bytes()).unwrap();
@@ -845,7 +869,6 @@ Zm9v
         let armor = decode(input.as_bytes()).unwrap();
         let headers: Vec<_> = armor
             .headers()
-            .iter()
             .map(|header| (header.key(), header.value()))
             .collect();
         assert_eq!(
@@ -1039,7 +1062,10 @@ Zm9v
                 format!("-----BEGIN {label}-----\nHash: {value}\n\nZm9v\n-----END {label}-----\n")
             };
             let armor = decode(block("SHA256, SHA512").as_bytes()).unwrap();
-            assert_eq!(armor.headers()[0].value(), "SHA256, SHA512");
+            assert_eq!(
+                armor.headers().next().map(|header| header.value()),
+                Some("SHA256, SHA512")
+            );
             for value in ["FOO", "sha256", "SHA256,", ""] {
                 assert_eq!(
                     failure(&block(value)),

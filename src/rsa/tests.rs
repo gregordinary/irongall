@@ -162,7 +162,7 @@ fn gnupg_self_signatures() {
         <[Packet<'_>; 5]>::try_from(packets).unwrap();
     let rsa_material =
         |packet: &Packet<'_>| match PublicKey::from_packet(packet).unwrap().material() {
-            KeyMaterial::Rsa { modulus, exponent } => (modulus.clone(), exponent.clone()),
+            KeyMaterial::Rsa { modulus, exponent } => (modulus.to_vec(), exponent.to_vec()),
             other => panic!("not an RSA key: {other:?}"),
         };
     let (modulus, exponent) = rsa_material(&primary);

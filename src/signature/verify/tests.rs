@@ -435,7 +435,7 @@ fn refusals() {
     let wide = [&a2_body[..material], &mpi(&[0x5A; 57]), &mpi(&[0x5A; 57])].concat();
     assert_eq!(
         signature_of(&wide).material(),
-        &crate::signature::SignatureMaterial::Opaque
+        crate::signature::SignatureMaterial::Opaque
     );
     assert_eq!(
         signature_of(&wide).verify(&key, document),

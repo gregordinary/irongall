@@ -86,7 +86,9 @@ mod tests;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-pub use subpacket::{KeyFlags, RevocationCode, RevocationReason, Subpacket, SubpacketType};
+pub use subpacket::{
+    KeyFlags, RevocationCode, RevocationReason, Subpacket, SubpacketType, Subpackets,
+};
 pub use verify::{DocumentHash, Subject, VerifyError};
 pub(crate) use verify::{Over, Prefix, PrimaryChecks, check_verifying_key};
 
@@ -139,12 +141,12 @@ wire_number! {
 }
 
 /// A signature's material, for the algorithms irongall verifies with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum SignatureMaterial {
+pub enum SignatureMaterial<'a> {
     /// An RSA signature, of any of the three RSA algorithms: the value
     /// m^d mod n, big-endian, without leading zeros (RFC 9580 §5.2.3.1).
-    Rsa(Vec<u8>),
+    Rsa(&'a [u8]),
     /// An Ed25519 signature in its native 64-octet encoding, R then S
     /// (RFC 8032 §5.1.6).
     ///
@@ -160,30 +162,40 @@ pub enum SignatureMaterial {
 
 /// A signature: the content of a Signature packet, or of an Embedded
 /// Signature subpacket.
+///
+/// A signature holds its body as it was read, and what is read from the body
+/// on demand, such as its subpackets and material, is read from that: so the
+/// memory a signature holds is its body and a few words, whatever the body
+/// holds. Two signatures are equal when their bodies are, octet for octet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
+    /// The body: from the version through the material, and, for a
+    /// signature read with what irongall cannot honor overlooked, any octets
+    /// after the material.
+    body: Box<[u8]>,
+    /// The signatures embedded in either area, hashed area first.
+    embedded: Box<[Signature]>,
+    /// Where the hashed area ends in the body: the end of the part the
+    /// signature's own hash covers (RFC 9580 §5.2.4).
+    hashed_end: usize,
+    /// Where the unhashed area ends in the body.
+    unhashed_end: usize,
+    /// Where the material begins in the body.
+    material_start: usize,
+    creation_time: u32,
+    /// How many of `embedded`, from the first, are in the hashed area.
+    embedded_hashed: u32,
     version: Version,
     signature_type: SignatureType,
     public_key_algorithm: PublicKeyAlgorithm,
     hash_algorithm: HashAlgorithm,
-    hashed: Box<[Subpacket]>,
-    unhashed: Box<[Subpacket]>,
     hash_prefix: [u8; 2],
-    salt: Box<[u8]>,
-    material: SignatureMaterial,
-    creation_time: u32,
-    /// The signatures embedded in either area, hashed area first.
-    embedded: Box<[Signature]>,
-    /// How many of `embedded`, from the first, are in the hashed area.
-    embedded_hashed: usize,
-    /// The body from the version through the hashed subpackets: the part of
-    /// the signature its own hash covers (RFC 9580 §5.2.4).
-    hashed_fields: Box<[u8]>,
-    /// The length of the body, from the version through the material.
-    length: usize,
-    /// How the signature was read: whether what irongall cannot honor
-    /// refused it or was overlooked.
+    /// What reading the signature did with what irongall cannot honor,
+    /// which decides how its material's integers are read.
     unhonored: Unhonored,
+    /// Whether the unhashed area read: one that did not, overlooked, is
+    /// taken for an empty one.
+    unhashed_read: bool,
 }
 
 impl Signature {
@@ -251,8 +263,9 @@ impl Signature {
         embedded: bool,
         unhonored: Unhonored,
     ) -> Result<Signature, PacketError> {
-        let from_version = fields.clone();
+        let mut body = fields.clone();
         let at = fields.offset();
+        let within = |fields: &Fields<'_>| fields.offset().saturating_sub(at);
         let version = match fields.u8()? {
             4 => Version::V4,
             6 => Version::V6,
@@ -264,23 +277,24 @@ impl Signature {
 
         let mut embedded_signatures = Vec::new();
         let hashed_at = fields.offset();
-        let hashed = subpacket::read_area(
-            area(&mut fields, version)?,
+        let hashed = area(&mut fields, version)?;
+        subpacket::read_area(
+            hashed.clone(),
             Area::Hashed,
             version,
             embedded,
             unhonored,
             &mut embedded_signatures,
         )?;
-        let creation_time = last(&hashed, SubpacketType::SIGNATURE_CREATION_TIME)
-            .and_then(subpacket::time)
-            .ok_or_else(|| fields.error_at(PacketErrorKind::MissingCreationTime, hashed_at))?;
-        let hashed_fields = from_version
-            .clone()
-            .take(fields.offset().saturating_sub(at))?
-            .into();
+        let creation_time = last(
+            Subpackets::of(hashed.clone().rest()),
+            SubpacketType::SIGNATURE_CREATION_TIME,
+        )
+        .and_then(subpacket::time)
+        .ok_or_else(|| fields.error_at(PacketErrorKind::MissingCreationTime, hashed_at))?;
+        let hashed_end = within(&fields);
         let embedded_hashed = embedded_signatures.len();
-        let unhashed = match subpacket::read_area(
+        let unhashed_read = match subpacket::read_area(
             area(&mut fields, version)?,
             Area::Unhashed,
             version,
@@ -288,52 +302,74 @@ impl Signature {
             unhonored,
             &mut embedded_signatures,
         ) {
-            Ok(unhashed) => unhashed,
+            Ok(()) => true,
             Err(_) if unhonored == Unhonored::Overlook => {
                 embedded_signatures.truncate(embedded_hashed);
-                Box::default()
+                false
             }
             Err(error) => return Err(error),
         };
+        let unhashed_end = within(&fields);
 
         let hash_prefix = fields.array()?;
-        let salt = match version {
-            Version::V4 => Box::default(),
-            Version::V6 => {
-                let size_at = fields.offset();
-                let size = fields.u8()?;
-                if hash_algorithm.v6_salt_size() != Some(size) {
-                    return Err(fields.error_at(PacketErrorKind::SaltSize, size_at));
-                }
-                fields.take(usize::from(size))?.into()
+        if version == Version::V6 {
+            let size_at = fields.offset();
+            let size = fields.u8()?;
+            if hash_algorithm.v6_salt_size() != Some(size) {
+                return Err(fields.error_at(PacketErrorKind::SaltSize, size_at));
             }
-        };
-        let material = read_material(&mut fields, public_key_algorithm, version, unhonored)?;
+            fields.take(usize::from(size))?;
+        }
+        let material_start = within(&fields);
+        read_material(&mut fields, public_key_algorithm, version, unhonored)?;
         match unhonored {
             Unhonored::Refuse => fields.finish()?,
             Unhonored::Overlook => {
                 fields.rest();
             }
         }
-        let length = fields.offset().saturating_sub(at);
 
         Ok(Signature {
+            body: body.rest().into(),
+            embedded: embedded_signatures.into_boxed_slice(),
+            hashed_end,
+            unhashed_end,
+            material_start,
+            creation_time,
+            embedded_hashed: u32::try_from(embedded_hashed).unwrap_or(u32::MAX),
             version,
             signature_type,
             public_key_algorithm,
             hash_algorithm,
-            hashed,
-            unhashed,
             hash_prefix,
-            salt,
-            material,
-            creation_time,
-            embedded: embedded_signatures.into_boxed_slice(),
-            embedded_hashed,
-            hashed_fields,
-            length,
             unhonored,
+            unhashed_read,
         })
+    }
+
+    /// Where an area's length begins, and how many octets it takes, in this
+    /// signature's version: the hashed area's length follows the four
+    /// octets of version and algorithms.
+    fn area_length_size(&self) -> usize {
+        match self.version {
+            Version::V4 => 2,
+            Version::V6 => 4,
+        }
+    }
+
+    /// The hashed area's subpackets, as octets.
+    fn hashed_area(&self) -> &[u8] {
+        let start = 4_usize.saturating_add(self.area_length_size());
+        self.body.get(start..self.hashed_end).unwrap_or_default()
+    }
+
+    /// The unhashed area's subpackets, as octets: none if they did not read.
+    fn unhashed_area(&self) -> &[u8] {
+        if !self.unhashed_read {
+            return &[];
+        }
+        let start = self.hashed_end.saturating_add(self.area_length_size());
+        self.body.get(start..self.unhashed_end).unwrap_or_default()
     }
 
     /// The signature's version.
@@ -366,24 +402,39 @@ impl Signature {
     /// A version 6 signature's salt, hashed before anything else (RFC 9580
     /// §5.2.4). Empty for version 4.
     pub fn salt(&self) -> &[u8] {
-        &self.salt
+        match self.version {
+            Version::V4 => &[],
+            // After the hash prefix and the salt's size.
+            Version::V6 => self
+                .body
+                .get(self.unhashed_end.saturating_add(3)..self.material_start)
+                .unwrap_or_default(),
+        }
     }
 
     /// The signature's material.
-    pub fn material(&self) -> &SignatureMaterial {
-        &self.material
+    pub fn material(&self) -> SignatureMaterial<'_> {
+        let mut fields = Fields::of(self.body.get(self.material_start..).unwrap_or_default());
+        // Read when the signature was, so this does not fail.
+        read_material(
+            &mut fields,
+            self.public_key_algorithm,
+            self.version,
+            self.unhonored,
+        )
+        .unwrap_or(SignatureMaterial::Opaque)
     }
 
     /// The hashed subpackets, in order: those the signature covers.
-    pub fn hashed_subpackets(&self) -> &[Subpacket] {
-        &self.hashed
+    pub fn hashed_subpackets(&self) -> Subpackets<'_> {
+        Subpackets::of(self.hashed_area())
     }
 
     /// The unhashed subpackets, in order. The signature does not cover them,
     /// so anyone who handles it can change them, and they are advisory only
     /// (RFC 9580 §13.13).
-    pub fn unhashed_subpackets(&self) -> &[Subpacket] {
-        &self.unhashed
+    pub fn unhashed_subpackets(&self) -> Subpackets<'_> {
+        Subpackets::of(self.unhashed_area())
     }
 
     /// When the signature was made, in seconds since the Unix epoch.
@@ -466,15 +517,16 @@ impl Signature {
     /// area, which this signature covers, and those in the unhashed area,
     /// which nothing covers.
     pub(crate) fn embedded_by_area(&self) -> (&[Signature], &[Signature]) {
-        self.embedded
-            .split_at_checked(self.embedded_hashed)
+        usize::try_from(self.embedded_hashed)
+            .ok()
+            .and_then(|hashed| self.embedded.split_at_checked(hashed))
             .unwrap_or((&self.embedded, &[]))
     }
 
     /// The part of the body the signature's own hash covers: from the version
     /// through the hashed subpackets (RFC 9580 §5.2.4).
     pub(crate) fn hashed_fields(&self) -> &[u8] {
-        &self.hashed_fields
+        self.body.get(..self.hashed_end).unwrap_or_default()
     }
 
     /// Whether the signature read as [`from_packet`](Self::from_packet)
@@ -487,22 +539,21 @@ impl Signature {
     /// The length of the signature's body, in octets: of its packet's body,
     /// or of the subpacket it is embedded in.
     pub(crate) fn length(&self) -> usize {
-        self.length
+        self.body.len()
     }
 
     /// The body of the last hashed subpacket of `subpacket_type`.
     fn last_hashed(&self, subpacket_type: SubpacketType) -> Option<&[u8]> {
-        last(&self.hashed, subpacket_type)
+        last(self.hashed_subpackets(), subpacket_type)
     }
 
     /// The bodies of the subpackets of `subpacket_type` in either area, hashed
     /// first.
     fn both_areas(&self, subpacket_type: SubpacketType) -> impl Iterator<Item = &[u8]> {
-        self.hashed
-            .iter()
-            .chain(&self.unhashed)
+        self.hashed_subpackets()
+            .chain(self.unhashed_subpackets())
             .filter(move |subpacket| subpacket.subpacket_type() == subpacket_type)
-            .map(Subpacket::body)
+            .map(|subpacket| subpacket.body())
     }
 }
 
@@ -524,12 +575,11 @@ enum Unhonored {
 }
 
 /// The body of the last subpacket of `subpacket_type` in `subpackets`.
-fn last(subpackets: &[Subpacket], subpacket_type: SubpacketType) -> Option<&[u8]> {
+fn last(subpackets: Subpackets<'_>, subpacket_type: SubpacketType) -> Option<&[u8]> {
     subpackets
-        .iter()
-        .rev()
-        .find(|subpacket| subpacket.subpacket_type() == subpacket_type)
-        .map(Subpacket::body)
+        .filter(|subpacket| subpacket.subpacket_type() == subpacket_type)
+        .last()
+        .map(|subpacket| subpacket.body())
 }
 
 /// The next subpacket area: its length, in two octets in version 4 and four
@@ -553,7 +603,7 @@ fn read_material<'a>(
     algorithm: PublicKeyAlgorithm,
     version: Version,
     unhonored: Unhonored,
-) -> Result<SignatureMaterial, PacketError> {
+) -> Result<SignatureMaterial<'a>, PacketError> {
     let mpi = |fields: &mut Fields<'a>| match unhonored {
         Unhonored::Refuse => fields.mpi(version),
         Unhonored::Overlook => fields.mpi_value(),
@@ -561,7 +611,7 @@ fn read_material<'a>(
     match algorithm {
         PublicKeyAlgorithm::RSA
         | PublicKeyAlgorithm::RSA_ENCRYPT_ONLY
-        | PublicKeyAlgorithm::RSA_SIGN_ONLY => Ok(SignatureMaterial::Rsa(mpi(fields)?.to_vec())),
+        | PublicKeyAlgorithm::RSA_SIGN_ONLY => Ok(SignatureMaterial::Rsa(mpi(fields)?)),
         PublicKeyAlgorithm::ED25519 => Ok(SignatureMaterial::Ed25519(fields.array()?)),
         // RFC 9580 §5.2.3.3.1 forbids EdDSALegacy in version 6.
         PublicKeyAlgorithm::EDDSA_LEGACY if version == Version::V4 => {

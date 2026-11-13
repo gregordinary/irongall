@@ -1,8 +1,8 @@
 //! Signature subpackets (RFC 9580 §5.2.3.7): the typed fields of a version 4
 //! or version 6 signature.
 
-use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::iter::FusedIterator;
 
 use super::{Signature, Unhonored};
 use crate::hash::HashAlgorithm;
@@ -72,14 +72,14 @@ wire_number! {
 }
 
 /// One signature subpacket, as it appears in its area.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Subpacket {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Subpacket<'a> {
     subpacket_type: SubpacketType,
     critical: bool,
-    body: Box<[u8]>,
+    body: &'a [u8],
 }
 
-impl Subpacket {
+impl<'a> Subpacket<'a> {
     /// The subpacket's type.
     pub fn subpacket_type(&self) -> SubpacketType {
         self.subpacket_type
@@ -92,9 +92,78 @@ impl Subpacket {
     }
 
     /// The subpacket's data, after its type.
-    pub fn body(&self) -> &[u8] {
-        &self.body
+    pub fn body(&self) -> &'a [u8] {
+        self.body
     }
+}
+
+/// The subpackets of one of a signature's areas, in the order they appear:
+/// see [`Signature::hashed_subpackets`].
+#[derive(Debug, Clone)]
+pub struct Subpackets<'a> {
+    area: Fields<'a>,
+}
+
+impl<'a> Subpackets<'a> {
+    /// The subpackets of `area`, an area reading the signature found well
+    /// framed.
+    pub(super) fn of(area: &'a [u8]) -> Subpackets<'a> {
+        Subpackets {
+            area: Fields::of(area),
+        }
+    }
+}
+
+impl<'a> Iterator for Subpackets<'a> {
+    type Item = Subpacket<'a>;
+
+    fn next(&mut self) -> Option<Subpacket<'a>> {
+        match next(&mut self.area) {
+            Ok(framed) => framed.map(|framed| framed.subpacket),
+            // Reading the signature found the area well framed, so this is
+            // not reached; the subpackets end rather than go on past a
+            // subpacket that does not frame.
+            Err(_) => {
+                self.area = Fields::of(&[]);
+                None
+            }
+        }
+    }
+}
+
+impl FusedIterator for Subpackets<'_> {}
+
+/// A subpacket as its area frames it.
+struct Framed<'a> {
+    /// Where its length begins.
+    start: usize,
+    subpacket: Subpacket<'a>,
+    /// A cursor over its body.
+    body: Fields<'a>,
+}
+
+/// Frames the next subpacket of `area`, or `None` at the area's end.
+fn next<'a>(area: &mut Fields<'a>) -> Result<Option<Framed<'a>>, PacketError> {
+    if area.is_empty() {
+        return Ok(None);
+    }
+    let start = area.offset();
+    let length = length(area)?;
+    // The length counts the type octet, so it is at least one.
+    let mut subpacket = area.split(length)?;
+    let Ok(octet) = subpacket.u8() else {
+        return Err(area.error_at(PacketErrorKind::InvalidSubpacket, start));
+    };
+    let body = subpacket.clone();
+    Ok(Some(Framed {
+        start,
+        subpacket: Subpacket {
+            subpacket_type: SubpacketType(octet & 0x7F),
+            critical: octet & 0x80 != 0,
+            body: subpacket.rest(),
+        },
+        body,
+    }))
 }
 
 /// The flags of a Key Flags subpacket (RFC 9580 §5.2.3.29).
@@ -313,8 +382,8 @@ pub(super) enum Area {
 /// malformed subpacket is kept as it is, one marked critical is kept, and an
 /// embedded signature that does not read is left out.
 ///
-/// The area is counted before it is read (see [`count`]), so the subpackets
-/// and the embedded signatures are each allocated for once.
+/// The subpackets themselves are not held: the signature holds its body, and
+/// [`Subpackets`] reads them from it again.
 pub(super) fn read_area(
     mut area: Fields<'_>,
     which: Area,
@@ -322,20 +391,21 @@ pub(super) fn read_area(
     embedded: bool,
     unhonored: Unhonored,
     embedded_signatures: &mut Vec<Signature>,
-) -> Result<Box<[Subpacket]>, PacketError> {
-    let counted = count(area.clone());
-    let mut subpackets = Vec::with_capacity(counted.subpackets);
+) -> Result<(), PacketError> {
     if !embedded {
-        embedded_signatures.reserve_exact(counted.signatures);
+        embedded_signatures.reserve_exact(count_embedded(area.clone()));
     }
     while let Some(Framed {
         start,
-        subpacket_type,
-        critical: marked_critical,
+        subpacket,
         body: body_fields,
     }) = next(&mut area)?
     {
-        let body = body_fields.clone().rest();
+        let Subpacket {
+            subpacket_type,
+            critical: marked_critical,
+            body,
+        } = subpacket;
         let well_formed = match subpacket_type {
             SubpacketType::SIGNATURE_CREATION_TIME
             | SubpacketType::SIGNATURE_EXPIRATION_TIME
@@ -364,33 +434,31 @@ pub(super) fn read_area(
                 Err(_) => {}
             }
         }
-        subpackets.push(Subpacket {
-            subpacket_type,
-            critical: marked_critical,
-            body: body.into(),
-        });
     }
-    Ok(subpackets.into_boxed_slice())
+    Ok(())
 }
 
-/// A subpacket as its area frames it, before anything in it is read.
-struct Framed<'a> {
-    /// Where its length begins.
-    start: usize,
-    subpacket_type: SubpacketType,
-    /// Whether the subpacket is marked critical.
-    critical: bool,
-    /// Its body, after its type.
-    body: Fields<'a>,
+/// How many of `area`'s subpackets may be embedded signatures, counted by
+/// their framing alone, up to the first subpacket that does not frame: those
+/// of the type whose bodies are as long as a signature's can be. Reading them
+/// then allocates once, and never for more signatures than the area's length
+/// can hold.
+fn count_embedded(mut area: Fields<'_>) -> usize {
+    let mut count: usize = 0;
+    while let Ok(Some(framed)) = next(&mut area) {
+        if framed.subpacket.subpacket_type == SubpacketType::EMBEDDED_SIGNATURE
+            && framed.subpacket.body.len() >= Signature::SHORTEST
+        {
+            count = count.saturating_add(1);
+        }
+    }
+    count
 }
 
-/// Frames the next subpacket of `area`, or `None` at the area's end.
-fn next<'a>(area: &mut Fields<'a>) -> Result<Option<Framed<'a>>, PacketError> {
-    if area.is_empty() {
-        return Ok(None);
-    }
-    let start = area.offset();
-    let length = match area.u8()? {
+/// Reads a subpacket's length (RFC 9580 §5.2.3.7), which counts its type
+/// octet and its body.
+fn length(area: &mut Fields<'_>) -> Result<usize, PacketError> {
+    Ok(match area.u8()? {
         octet @ 0..=191 => usize::from(octet),
         // At most 16319, so the addition cannot wrap. `& 0x3F` is `- 192`
         // over this range.
@@ -399,49 +467,5 @@ fn next<'a>(area: &mut Fields<'a>) -> Result<Option<Framed<'a>>, PacketError> {
             usize::from(u16::from_be_bytes([octet & 0x3F, second]).wrapping_add(192))
         }
         255 => usize::try_from(area.u32()?).unwrap_or(usize::MAX),
-    };
-    // The length counts the type octet, so it is at least one.
-    let mut body = area.split(length)?;
-    let Ok(octet) = body.u8() else {
-        return Err(area.error_at(PacketErrorKind::InvalidSubpacket, start));
-    };
-    Ok(Some(Framed {
-        start,
-        subpacket_type: SubpacketType(octet & 0x7F),
-        critical: octet & 0x80 != 0,
-        body,
-    }))
-}
-
-/// What a subpacket area holds, as [`count`] counts it.
-struct Counted {
-    /// The subpackets.
-    subpackets: usize,
-    /// The Embedded Signature subpackets long enough to hold a signature:
-    /// those whose bodies are at least [`Signature::SHORTEST`] octets.
-    signatures: usize,
-}
-
-/// Counts what `area` holds by framing it alone, up to the first subpacket
-/// that does not frame, so that reading it allocates once for its
-/// subpackets and once for its embedded signatures.
-///
-/// No more embedded signatures are counted than the area's length can hold,
-/// so that what is allocated for them is bounded by the area's length even
-/// where none of them reads.
-fn count(mut area: Fields<'_>) -> Counted {
-    let mut counted = Counted {
-        subpackets: 0,
-        signatures: 0,
-    };
-    while let Ok(Some(framed)) = next(&mut area) {
-        counted.subpackets = counted.subpackets.saturating_add(1);
-        let mut body = framed.body;
-        if framed.subpacket_type == SubpacketType::EMBEDDED_SIGNATURE
-            && body.rest().len() >= Signature::SHORTEST
-        {
-            counted.signatures = counted.signatures.saturating_add(1);
-        }
-    }
-    counted
+    })
 }

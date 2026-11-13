@@ -278,7 +278,7 @@ fn subpackets(count: usize) -> (usize, Measured) {
     let [signature] = detached.signatures() else {
         panic!("one signature");
     };
-    assert_eq!(signature.unhashed_subpackets().len(), count);
+    assert_eq!(signature.unhashed_subpackets().count(), count);
     (input.len(), measured)
 }
 
@@ -323,7 +323,7 @@ fn armor_headers(count: usize) -> (usize, Measured) {
     let mut input = b"-----BEGIN PGP SIGNATURE-----\n".to_vec();
     input.extend_from_slice(&b"a:\n".repeat(count));
     input.extend_from_slice(format!("\n{data}\n-----END PGP SIGNATURE-----\n").as_bytes());
-    let headers = irongall::armor::decode(&input).unwrap().headers().len();
+    let headers = irongall::armor::decode(&input).unwrap().headers().count();
     assert_eq!(headers, count);
     let (detached, measured) = read_document(&input);
     assert_eq!(detached.signatures().len(), 1);

@@ -287,6 +287,17 @@ pub(crate) struct Fields<'a> {
 }
 
 impl<'a> Fields<'a> {
+    /// A cursor over `bytes` that were read and found well formed before,
+    /// so that reading them again does not fail, and a failure, which would
+    /// be a defect, carries no offset in any input.
+    pub(crate) fn of(bytes: &'a [u8]) -> Fields<'a> {
+        Fields {
+            rest: bytes,
+            offset: 0,
+            tag: None,
+        }
+    }
+
     /// A failure at the cursor.
     pub(crate) fn error(&self, kind: PacketErrorKind) -> PacketError {
         self.error_at(kind, self.offset)

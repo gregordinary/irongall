@@ -301,7 +301,7 @@ impl Signature {
         if self.public_key_algorithm != key.algorithm() {
             return Err(VerifyError::AlgorithmMismatch);
         }
-        Check::of(key, &self.material)
+        Check::of(key, self.material())
     }
 
     /// Checks each hash the signature may be made over, as
@@ -354,7 +354,7 @@ impl Signature {
             } => rsa::PublicKey::new(modulus, exponent)
                 .and_then(|key| key.verify(digest, value))
                 .map_err(rsa_failure)?,
-            Check::Ed25519 { key, value } => ed25519::verify(key, digest, value)?,
+            Check::Ed25519 { key, value } => ed25519::verify(key, digest, &value)?,
         }
         Ok(())
     }
@@ -391,7 +391,7 @@ impl Signature {
     /// comes before the subject's data: a version 6 signature's salt.
     fn context(&self) -> Result<Context, VerifyError> {
         let mut context = Context::new(self.hash_algorithm).ok_or(VerifyError::UnsupportedHash)?;
-        context.update(&self.salt);
+        context.update(self.salt());
         Ok(context)
     }
 
@@ -629,7 +629,7 @@ impl<'k> PrimaryChecks<'k> {
         };
         let before = match signature.version {
             Version::V4 => 0,
-            Version::V6 => signature.salt.len().saturating_add(framed(self.primary)),
+            Version::V6 => signature.salt().len().saturating_add(framed(self.primary)),
         };
         let subject = match over {
             Over::Key => 0,
@@ -638,7 +638,7 @@ impl<'k> PrimaryChecks<'k> {
         };
         before
             .saturating_add(subject)
-            .saturating_add(signature.hashed_fields.len())
+            .saturating_add(signature.hashed_fields().len())
             .saturating_add(6)
     }
 
@@ -691,7 +691,7 @@ enum Check<'a> {
     },
     Ed25519 {
         key: &'a [u8; 32],
-        value: &'a [u8; 64],
+        value: [u8; 64],
     },
 }
 
@@ -705,7 +705,7 @@ impl<'a> Check<'a> {
     /// the key, and [`VerifyError::BadSignature`] if it does but cannot read
     /// the material, which the key then did not make: an EdDSALegacy
     /// signature whose integers are wider than Ed25519's.
-    fn of(key: &'a PublicKey, material: &'a SignatureMaterial) -> Result<Check<'a>, VerifyError> {
+    fn of(key: &'a PublicKey, material: SignatureMaterial<'a>) -> Result<Check<'a>, VerifyError> {
         match (VerifyingKey::of(key)?, material) {
             (VerifyingKey::Rsa { modulus, exponent }, SignatureMaterial::Rsa(value)) => {
                 Ok(Check::Rsa {

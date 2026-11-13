@@ -415,10 +415,10 @@ fn check(signature: &Signature, key: &[u8; 32], data: &[u8]) {
         panic!("not an Ed25519 signature: {:?}", signature.material());
     };
     let digest = signature_digest(signature, data);
-    assert_eq!(verify(key, &digest, value), Ok(()));
+    assert_eq!(verify(key, &digest, &value), Ok(()));
     let (_, other) = key_pair([1; 32]);
     assert_eq!(
-        verify(&other, &digest, value),
+        verify(&other, &digest, &value),
         Err(Ed25519Error::BadSignature)
     );
     let mut altered = digest;
@@ -429,7 +429,7 @@ fn check(signature: &Signature, key: &[u8; 32], data: &[u8]) {
         other => panic!("a digest too short for Ed25519: {other:?}"),
     }
     assert_eq!(
-        verify(key, &altered, value),
+        verify(key, &altered, &value),
         Err(Ed25519Error::BadSignature)
     );
 }

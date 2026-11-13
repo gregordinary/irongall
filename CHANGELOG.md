@@ -9,6 +9,29 @@ caller must act on is prefixed **Breaking.**
 A change to what irongall accepts is recorded even when no signature of the
 public API changes, since a verifier's verdicts are part of its contract.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking.** A signature's subpackets are read from its body when they
+  are asked for, rather than held apart. `Signature::hashed_subpackets` and
+  `Signature::unhashed_subpackets` return `Subpackets`, an iterator of
+  `Subpacket<'_>`, in place of a slice; a `Subpacket` borrows its body from
+  the signature, and is `Copy`.
+- **Breaking.** A signature's and a key's material are read from the
+  packet's body when they are asked for. `Signature::material` returns
+  `SignatureMaterial<'_>` by value, whose `Rsa` borrows the signature's
+  octets, and `PublicKey::material` returns `KeyMaterial<'_>` by value,
+  whose `Rsa` borrows the modulus and the exponent and whose `Ed25519`
+  borrows the 32-octet encoding. Both are `Copy`.
+- **Breaking.** `Armor::headers` returns `Headers`, an iterator of
+  `Header<'_>`, in place of a slice; a `Header` borrows its key and its value
+  from the block, and is `Copy`.
+- Two signatures are equal when their bodies are, octet for octet. Earlier
+  releases compared what was read from them, so two version 4 signatures
+  whose material differed only in the bit count written for an integer
+  compared equal.
+
 ## [0.1.2] - 2026-11-10
 
 ### Added

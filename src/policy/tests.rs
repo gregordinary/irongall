@@ -844,6 +844,91 @@ fn a_policy_may_refuse_text_signatures() {
     }
 }
 
+/// A signature that names its intended recipients in its hashed area was
+/// made within an encrypted message, and is refused over a document, by a
+/// primary key and by a subkey, whatever recipient it names. Named only in
+/// the unhashed area, which anyone can add to, they refuse nothing; nor do
+/// they in a certificate's own statement.
+#[test]
+fn a_signature_for_intended_recipients_is_refused() {
+    let primary = ed25519(1);
+    let subkey = ed25519(2);
+    let certificate = archive(&primary, &subkey);
+    let recipients = [
+        [&[4][..], primary.public().fingerprint().as_bytes()].concat(),
+        [&[4][..], &[0xAB; 20]].concat(),
+        [&[6][..], &[0xAB; 32]].concat(),
+        vec![5, 0xAB, 0xAB],
+    ];
+    for key in [&primary, &subkey] {
+        let fingerprint = key.public().fingerprint();
+        // The defect removed: the same signature with no recipient.
+        assert_eq!(
+            verdict(&certificate, &[&signed(key, SIGNED)]),
+            Ok(fingerprint)
+        );
+        for recipient in &recipients {
+            for signature_type in [SignatureType::TEXT, SignatureType::BINARY] {
+                let named = key
+                    .sign(signature_type, SIGNED)
+                    .hashed(SubpacketType::INTENDED_RECIPIENT_FINGERPRINT, recipient)
+                    .over_document(DOCUMENT);
+                assert_eq!(
+                    verdict(&certificate, &[&named]),
+                    Err(Reason::IntendedRecipient),
+                    "{recipient:02x?}"
+                );
+                // It does not mask a signature beside it.
+                assert_eq!(
+                    verdict(&certificate, &[&named, &signed(key, SIGNED)]),
+                    Ok(fingerprint)
+                );
+                let unhashed = key
+                    .sign(signature_type, SIGNED)
+                    .unhashed(SubpacketType::INTENDED_RECIPIENT_FINGERPRINT, recipient)
+                    .over_document(DOCUMENT);
+                assert_eq!(verdict(&certificate, &[&unhashed]), Ok(fingerprint));
+            }
+        }
+    }
+
+    // Marked critical, it refuses the signature as it is read.
+    let critical = primary
+        .sign(SignatureType::BINARY, SIGNED)
+        .hashed_marked(
+            SubpacketType::INTENDED_RECIPIENT_FINGERPRINT,
+            true,
+            &recipients[1],
+        )
+        .over_document(DOCUMENT);
+    let packet = packet::packets(&critical).next().unwrap().unwrap();
+    assert!(Signature::from_packet(&packet).is_err());
+
+    // A certificate's self-signature and binding that name recipients still
+    // grant.
+    fn named(signing: forge::Signing<'_>) -> forge::Signing<'_> {
+        signing.hashed(SubpacketType::INTENDED_RECIPIENT_FINGERPRINT, &[4; 21])
+    }
+    let certificate = forge::certificate(&[
+        &primary.primary(),
+        &forge::user_id(USER_ID),
+        &named(primary.sign(SignatureType::POSITIVE_CERTIFICATION, CREATED))
+            .key_flags(CERTIFY | SIGN)
+            .over_user_id(&primary, USER_ID),
+        &subkey.subkey(),
+        &named(primary.sign(SignatureType::SUBKEY_BINDING, CREATED))
+            .key_flags(SIGN)
+            .embed(&back_signature(&primary, &subkey, CREATED))
+            .over_subkey(&primary, &subkey),
+    ]);
+    for key in [&primary, &subkey] {
+        assert_eq!(
+            verdict(&certificate, &[&signed(key, SIGNED)]),
+            Ok(key.public().fingerprint())
+        );
+    }
+}
+
 /// A key that re-signs a document can leave the signature it replaced
 /// beside the new one. The refused one, first, does not mask the accepted
 /// one.

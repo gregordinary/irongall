@@ -102,6 +102,12 @@
 //!   return, and a text signature they make over a text that has one does
 //!   not verify: read that way, a line feed could be replaced by a carriage
 //!   return and the signature still hold.
+//! - **Intended recipients** named in a signature's hashed area refuse it as
+//!   a signature over a document: §5.2.3.36 makes such a signature valid
+//!   only within an encrypted message sent to one of them, and irongall
+//!   verifies outside one. GnuPG does not act on the subpacket, and Sequoia
+//!   acts on it only when it decrypts. One in the unhashed area, which
+//!   anyone can add, refuses nothing.
 //! - **Cleartext signed messages** are read as GnuPG reads them: each line
 //!   loses its trailing carriage returns with the trailing spaces and tabs
 //!   §7.1 names. A line beginning with a dash must be dash-escaped, and

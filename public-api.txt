@@ -655,6 +655,7 @@ pub mod irongall::policy
 pub irongall::policy::Reason::AfterKeyExpiration
 pub irongall::policy::Reason::BeforeKeyCreation
 pub irongall::policy::Reason::CertificateRevoked
+pub irongall::policy::Reason::IntendedRecipient
 pub irongall::policy::Reason::KeyExpired
 pub irongall::policy::Reason::MissingBackSignature
 pub irongall::policy::Reason::MissingDirectKeySignature

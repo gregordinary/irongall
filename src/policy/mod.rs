@@ -176,13 +176,22 @@
 //!
 //! A signature over a document is accepted when it verifies with a key that
 //! may sign, rests on a hash the policy accepts, is of a type the policy
-//! accepts, is dated no later than the given time and the clock skew allow,
-//! was made within the key's window, and, if the policy requires fresh
-//! signatures, had not expired by the given time. The key's window must
-//! still be open at the given time, too: a signature's date is its signer's
-//! claim, so once a key has expired, whoever holds it could otherwise date a
-//! new signature within its life. A document pinned in the past is judged
-//! as of the time it was published.
+//! accepts, names no intended recipient, is dated no later than the given
+//! time and the clock skew allow, was made within the key's window, and, if
+//! the policy requires fresh signatures, had not expired by the given time.
+//! The key's window must still be open at the given time, too: a signature's
+//! date is its signer's claim, so once a key has expired, whoever holds it
+//! could otherwise date a new signature within its life. A document pinned
+//! in the past is judged as of the time it was published.
+//!
+//! A signature that names its intended recipients in its hashed area (RFC
+//! 9580 §5.2.3.36) was made within an encrypted message, and is valid only
+//! there, where the message was encrypted to one of them. irongall verifies
+//! outside one, so it refuses such a signature
+//! ([`Reason::IntendedRecipient`]): otherwise whoever received the message
+//! could present its signed content, with the signature, as signed for
+//! someone else (§13.12). Only the hashed area counts, since anyone who
+//! handles a signature can add a subpacket to its unhashed area.
 
 mod statements;
 #[cfg(test)]
@@ -198,7 +207,7 @@ use crate::cert::{Certificate, Subkey, UserId};
 use crate::hash::HashAlgorithm;
 use crate::key::{KeyMaterial, PublicKey};
 use crate::packet::Version;
-use crate::signature::{self, Signature, SignatureType, Subject};
+use crate::signature::{self, Signature, SignatureType, Subject, SubpacketType};
 use statements::{Statement, Statements};
 
 /// The rules a signature is judged by.
@@ -560,6 +569,11 @@ pub enum Reason {
     /// certificate's signatures allows, so a restriction its primary key
     /// made might be missed (see the [module documentation](self)).
     UnattributedSignatures,
+    /// The signature names in its hashed area the intended recipients of an
+    /// encrypted message it was made within, and is valid only there (RFC
+    /// 9580 §5.2.3.36; see the [module
+    /// documentation](self#a-documents-signature)).
+    IntendedRecipient,
 }
 
 impl fmt::Display for Reason {
@@ -629,6 +643,9 @@ impl fmt::Display for Reason {
             Reason::UnattributedSignatures => {
                 "the signing key's certificate holds more signatures out of place than irongall \
                  tries to place"
+            }
+            Reason::IntendedRecipient => {
+                "the signature was made within an encrypted message, for its intended recipients"
             }
         })
     }
@@ -781,6 +798,9 @@ pub(crate) fn accept(
     if signature.signature_type() == SignatureType::TEXT && !policy.text_signatures {
         return Err(Reason::TextSignature);
     }
+    if names_intended_recipients(signature) {
+        return Err(Reason::IntendedRecipient);
+    }
     let made = u64::from(signature.creation_time());
     if made > policy.horizon(now) {
         return Err(Reason::Postdated);
@@ -798,6 +818,16 @@ pub(crate) fn accept(
         return Err(Reason::SignatureExpired);
     }
     Ok(())
+}
+
+/// Whether a signature names intended recipients in its hashed area, which
+/// it covers (see the [module documentation](self#a-documents-signature)).
+/// A recipient of any key version counts, one RFC 9580 gives no fingerprint
+/// among them.
+fn names_intended_recipients(signature: &Signature) -> bool {
+    signature.hashed_subpackets().any(|subpacket| {
+        subpacket.subpacket_type() == SubpacketType::INTENDED_RECIPIENT_FINGERPRINT
+    })
 }
 
 /// When a signature expires, in seconds since the Unix epoch, or `None` if

@@ -11,6 +11,11 @@ public API changes, since a verifier's verdicts are part of its contract.
 
 ## [Unreleased]
 
+### Added
+
+- `policy::Reason::IntendedRecipient`, the reason a signature that names
+  intended recipients is refused over a document.
+
 ### Changed
 
 - **Breaking.** A signature's subpackets are read from its body when they
@@ -40,6 +45,16 @@ public API changes, since a verifier's verdicts are part of its contract.
   its size, and a keyring in at most 22 times once it is a `Keyring` and 44
   times while its certificates are combined into one, where 0.1.2 held them
   in up to 16, 28, and 56 times.
+
+### Security
+
+- A signature over a document that names intended recipients in its hashed
+  area is refused, as `Reason::IntendedRecipient`: RFC 9580 §5.2.3.36 makes
+  such a signature valid only within an encrypted message sent to one of
+  them. Earlier releases verified it, so a signature lifted from a signed
+  and encrypted message verified as a detached signature over its content.
+  One marked critical was, and is, refused as a critical subpacket irongall
+  does not honor.
 
 ## [0.1.2] - 2026-11-10
 

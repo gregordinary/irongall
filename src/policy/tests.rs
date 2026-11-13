@@ -797,6 +797,38 @@ fn a_signature_over_a_hash_the_policy_refuses_is_refused() {
     );
 }
 
+/// Two policies that accept the same hashes are equal, however their hashes
+/// were chosen, and a policy accepts exactly the hashes chosen for it.
+#[test]
+fn policies_are_equal_by_the_hashes_they_accept() {
+    let sha256 = HashAlgorithm::SHA256;
+    assert_eq!(
+        Policy::new()
+            .with_hash(sha256, false)
+            .with_hash(sha256, true),
+        Policy::new()
+    );
+    assert_eq!(Policy::new().with_hash(sha256, true), Policy::new());
+    assert_ne!(Policy::new().with_hash(sha256, false), Policy::new());
+
+    let mut policy = Policy::new();
+    for number in 0..=u8::MAX {
+        policy = policy.with_hash(HashAlgorithm(number), number % 3 == 0);
+    }
+    for number in 0..=u8::MAX {
+        assert_eq!(
+            policy.accepts_hash(HashAlgorithm(number)),
+            number % 3 == 0,
+            "{number}"
+        );
+    }
+    let debug = format!("{:?}", Policy::new());
+    assert!(
+        debug.contains("hashes: {HashAlgorithm(8: SHA2-256), HashAlgorithm(9: SHA2-384)"),
+        "{debug}"
+    );
+}
+
 /// A policy that holds a document to its exact octets refuses a text
 /// signature, which verifies over the document with other line endings too,
 /// and accepts a binary one; the refusal does not mask a binary signature

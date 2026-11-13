@@ -60,6 +60,13 @@ public API changes, since a verifier's verdicts are part of its contract.
   `VerifyError::HashPrefixMismatch`. The documentation of
   `Signature::verify` gives the order in which the errors are reported.
 
+### Fixed
+
+- Two policies are equal when they accept the same hash algorithms. Earlier
+  releases compared them in the order they were accepted, so a policy that
+  refused and then accepted a hash compared unequal to one that had always
+  accepted it.
+
 ### Security
 
 - A signature over a document that names intended recipients in its hashed

@@ -231,7 +231,7 @@ use statements::{Statement, Statements};
 /// - Text signatures as well as binary ones.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Policy {
-    hashes: Vec<HashAlgorithm>,
+    hashes: Hashes,
     rsa_minimum_bits: usize,
     max_signatures: usize,
     fresh: bool,
@@ -257,7 +257,10 @@ impl Policy {
                 HashAlgorithm::SHA3_256,
                 HashAlgorithm::SHA3_512,
             ]
-            .to_vec(),
+            .into_iter()
+            .fold(Hashes::default(), |hashes, algorithm| {
+                hashes.with(algorithm, true)
+            }),
             rsa_minimum_bits: 2048,
             max_signatures: 16,
             fresh: true,
@@ -271,7 +274,7 @@ impl Policy {
     /// An Ed25519 signature also needs a hash of 256 bits or more, whatever
     /// the policy accepts (RFC 9580 §5.2.3.3 and §5.2.3.4).
     pub fn accepts_hash(&self, algorithm: HashAlgorithm) -> bool {
-        self.hashes.contains(&algorithm)
+        self.hashes.contains(algorithm)
     }
 
     /// The policy with `algorithm` accepted, or not.
@@ -281,10 +284,7 @@ impl Policy {
     /// for an Ed25519 signature, which needs a longer hash.
     #[must_use]
     pub fn with_hash(mut self, algorithm: HashAlgorithm, accepted: bool) -> Policy {
-        self.hashes.retain(|&held| held != algorithm);
-        if accepted {
-            self.hashes.push(algorithm);
-        }
+        self.hashes = self.hashes.with(algorithm, accepted);
         self
     }
 
@@ -430,6 +430,53 @@ impl Policy {
         } else {
             self.accepts_hash_of(signature)
         }
+    }
+}
+
+/// A set of hash algorithms: one bit for each of the 256 an octet names, so
+/// that two sets with the same members are equal however they were made.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct Hashes([u64; 4]);
+
+impl Hashes {
+    /// The word and the bit within it that hold `algorithm`.
+    fn bit(algorithm: HashAlgorithm) -> (usize, u64) {
+        let number = algorithm.number();
+        (
+            usize::from(number.div_euclid(64)),
+            1_u64.wrapping_shl(u32::from(number.rem_euclid(64))),
+        )
+    }
+
+    fn contains(self, algorithm: HashAlgorithm) -> bool {
+        let (word, bit) = Hashes::bit(algorithm);
+        self.0.get(word).is_some_and(|word| word & bit != 0)
+    }
+
+    /// The set with `algorithm` in it if `member`, and without it if not.
+    fn with(mut self, algorithm: HashAlgorithm, member: bool) -> Hashes {
+        let (word, bit) = Hashes::bit(algorithm);
+        if let Some(word) = self.0.get_mut(word) {
+            if member {
+                *word |= bit;
+            } else {
+                *word &= !bit;
+            }
+        }
+        self
+    }
+}
+
+/// Lists the members, in the order of their numbers.
+impl fmt::Debug for Hashes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set()
+            .entries(
+                (0..=u8::MAX)
+                    .map(HashAlgorithm)
+                    .filter(|&algorithm| self.contains(algorithm)),
+            )
+            .finish()
     }
 }
 

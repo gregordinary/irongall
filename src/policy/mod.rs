@@ -770,13 +770,18 @@ impl<'a> Authority<'a> {
     /// two-octet hash prefix, and everything a signature is hashed over is
     /// public, so anyone can give a signature the prefix that lets it reach
     /// one in the search too. A certificate of uncertain origin, such as a
-    /// copy from a keyserver, can therefore make judging it cost time in
-    /// proportion to its size. For each megabyte of such signatures, that is
-    /// on the order of a second or two under an RSA-2048 or Ed25519 primary
-    /// key, and it grows with an RSA key's width and exponent: about 5
-    /// seconds under a 4096-bit key and 20 under an 8192-bit key, with the
-    /// exponent 65537, and about a minute under an 8192-bit key with the
-    /// largest exponent irongall accepts, 2^33 - 1. It can also hold user IDs
+    /// copy from a keyserver, can therefore make judging it cost up to three
+    /// public-key operations for each of its signatures, which can be as
+    /// short as 20 octets under an RSA primary key, 22 under an EdDSALegacy
+    /// one, and 82 under an Ed25519 one: a certification revocation after a
+    /// user ID is checked over the user ID, over the primary key alone, and
+    /// in the search over another user ID. For each megabyte of such
+    /// signatures, that is about 2 seconds under an Ed25519 primary key, 3
+    /// under an RSA-2048 one, and 7 under an EdDSALegacy one, and it grows
+    /// with an RSA key's width and exponent: about 11 seconds under a 4096-bit
+    /// key and 45 under an 8192-bit key, with the exponent 65537, and about
+    /// 2.5 minutes under an 8192-bit key with the largest exponent irongall
+    /// accepts, 2^33 - 1. It can also hold user IDs
     /// added without a signature until the search exceeds its bound, and
     /// grant nothing. [`Keyring::verify`](crate::keyring::Keyring::verify)
     /// judges a certificate only once one of its keys has made a signature

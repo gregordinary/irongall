@@ -72,6 +72,12 @@ public API changes, since a verifier's verdicts are part of its contract.
 
 ### Fixed
 
+- The documentation of `policy::Authority::new` states what judging a
+  hostile certificate costs from its bound: up to three public-key
+  operations for each signature, which can be as short as 20 octets. 0.1.2
+  stated the time one operation for each takes, which understated the cost
+  under an RSA primary key two to two and a half times, and gave none for an
+  EdDSALegacy primary key, whose signatures can be as short as 22 octets.
 - Two policies are equal when they accept the same hash algorithms. Earlier
   releases compared them in the order they were accepted, so a policy that
   refused and then accepted a hash compared unequal to one that had always

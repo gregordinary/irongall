@@ -1,80 +1,38 @@
 //! SHA2-224 and SHA2-256 (FIPS 180-4 §6.2 and §6.3), which differ only in
 //! their initial state and in how much of the final state they output.
 
-use super::{BlockBuffer, HashFunction, ch, maj, write_words};
+use super::{BlockBuffer, ch, maj, write_words};
 
-/// SHA2-224 (FIPS 180-4 §6.3), with a 28-byte digest.
-#[derive(Debug, Clone)]
-pub struct Sha224(Engine);
-
-impl Default for Sha224 {
-    fn default() -> Sha224 {
-        <Sha224 as HashFunction>::new()
-    }
+hash_function! {
+    /// SHA2-224 (FIPS 180-4 §6.3), with a 28-byte digest.
+    Sha224(Engine) -> [u8; 28],
+    new: Engine::new([
+        0xC105_9ED8,
+        0x367C_D507,
+        0x3070_DD17,
+        0xF70E_5939,
+        0xFFC0_0B31,
+        0x6858_1511,
+        0x64F9_8FA7,
+        0xBEFA_4FA4,
+    ]),
+    output: write_words,
 }
 
-impl HashFunction for Sha224 {
-    type Output = [u8; 28];
-
-    fn new() -> Sha224 {
-        Sha224(Engine::new([
-            0xC105_9ED8,
-            0x367C_D507,
-            0x3070_DD17,
-            0xF70E_5939,
-            0xFFC0_0B31,
-            0x6858_1511,
-            0x64F9_8FA7,
-            0xBEFA_4FA4,
-        ]))
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.0.update(data);
-    }
-
-    fn finalize(self) -> [u8; 28] {
-        let mut output = [0; 28];
-        write_words(&self.0.finish(), &mut output);
-        output
-    }
-}
-
-/// SHA2-256 (FIPS 180-4 §6.2), with a 32-byte digest.
-#[derive(Debug, Clone)]
-pub struct Sha256(Engine);
-
-impl Default for Sha256 {
-    fn default() -> Sha256 {
-        <Sha256 as HashFunction>::new()
-    }
-}
-
-impl HashFunction for Sha256 {
-    type Output = [u8; 32];
-
-    fn new() -> Sha256 {
-        Sha256(Engine::new([
-            0x6A09_E667,
-            0xBB67_AE85,
-            0x3C6E_F372,
-            0xA54F_F53A,
-            0x510E_527F,
-            0x9B05_688C,
-            0x1F83_D9AB,
-            0x5BE0_CD19,
-        ]))
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.0.update(data);
-    }
-
-    fn finalize(self) -> [u8; 32] {
-        let mut output = [0; 32];
-        write_words(&self.0.finish(), &mut output);
-        output
-    }
+hash_function! {
+    /// SHA2-256 (FIPS 180-4 §6.2), with a 32-byte digest.
+    Sha256(Engine) -> [u8; 32],
+    new: Engine::new([
+        0x6A09_E667,
+        0xBB67_AE85,
+        0x3C6E_F372,
+        0xA54F_F53A,
+        0x510E_527F,
+        0x9B05_688C,
+        0x1F83_D9AB,
+        0x5BE0_CD19,
+    ]),
+    output: write_words,
 }
 
 /// The computation SHA2-224 and SHA2-256 share.
@@ -82,8 +40,6 @@ impl HashFunction for Sha256 {
 struct Engine {
     state: [u32; 8],
     buffer: BlockBuffer<64>,
-    /// The input length in bytes, modulo 2^64.
-    length: u64,
 }
 
 impl Engine {
@@ -91,20 +47,17 @@ impl Engine {
         Engine {
             state,
             buffer: BlockBuffer::new(),
-            length: 0,
         }
     }
 
     fn update(&mut self, data: &[u8]) {
-        self.length = self.length.wrapping_add(data.len() as u64);
         self.buffer
             .update(data, |block| compress(&mut self.state, block));
     }
 
     fn finish(mut self) -> [u32; 8] {
-        let bits = self.length.wrapping_mul(8).to_be_bytes();
         self.buffer
-            .finish(&bits, |block| compress(&mut self.state, block));
+            .finish::<8>(|block| compress(&mut self.state, block));
         self.state
     }
 }

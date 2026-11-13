@@ -28,6 +28,46 @@
 //! a verifier takes it in. [`HashAlgorithm`] is the number a signature names
 //! its hash algorithm by, which may be one this module does not implement.
 
+/// Defines a hash function that runs an engine from an initial state, and
+/// outputs as much of the state the engine finishes in as its digest takes:
+/// the public type, its `Default`, and its [`HashFunction`] implementation.
+macro_rules! hash_function {
+    (
+        $(#[$doc:meta])*
+        $name:ident($engine:ty) -> [u8; $length:literal],
+        new: $new:expr,
+        output: $output:path $(,)?
+    ) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone)]
+        pub struct $name($engine);
+
+        impl Default for $name {
+            fn default() -> $name {
+                <$name as $crate::hash::HashFunction>::new()
+            }
+        }
+
+        impl $crate::hash::HashFunction for $name {
+            type Output = [u8; $length];
+
+            fn new() -> $name {
+                $name($new)
+            }
+
+            fn update(&mut self, data: &[u8]) {
+                self.0.update(data);
+            }
+
+            fn finalize(self) -> [u8; $length] {
+                let mut output = [0; $length];
+                $output(&self.0.finish(), &mut output);
+                output
+            }
+        }
+    };
+}
+
 mod sha1;
 mod sha256;
 mod sha3;
@@ -283,6 +323,9 @@ struct BlockBuffer<const N: usize> {
     block: [u8; N],
     /// How many leading bytes of `block` hold input. Always less than `N`.
     filled: usize,
+    /// How many bytes it has taken in all, modulo 2^64, which the SHA-1 and
+    /// SHA-2 padding ends with. No input reaches 2^64 bytes.
+    length: u64,
 }
 
 impl<const N: usize> BlockBuffer<N> {
@@ -290,11 +333,15 @@ impl<const N: usize> BlockBuffer<N> {
         BlockBuffer {
             block: [0; N],
             filled: 0,
+            length: 0,
         }
     }
 
     /// Takes `data`, passing each block it completes to `compress`.
     fn update(&mut self, data: &[u8], mut compress: impl FnMut(&[u8; N])) {
+        // A `usize` is at most 64 bits wide on every target.
+        let taken = u64::try_from(data.len()).unwrap_or(u64::MAX);
+        self.length = self.length.wrapping_add(taken);
         let mut data = data;
         if self.filled != 0 {
             // The held block's free space is never empty, since `filled < N`.
@@ -322,10 +369,13 @@ impl<const N: usize> BlockBuffer<N> {
 
     /// Pads the held input and passes the final block, or two, to `compress`.
     ///
-    /// The padding is a single one bit, zero bits up to the last
-    /// `length.len()` bytes of a block, and then `length`: the message length
-    /// in bits, big-endian (FIPS 180-4 §5.1).
-    fn finish(mut self, length: &[u8], mut compress: impl FnMut(&[u8; N])) {
+    /// The padding is a single one bit, zero bits up to the last `L` bytes of
+    /// a block, and then the message's length in bits, big-endian, in those
+    /// `L` bytes: 8 for SHA-1 and SHA2-256, and 16 for SHA2-512 (FIPS 180-4
+    /// §5.1).
+    fn finish<const L: usize>(mut self, mut compress: impl FnMut(&[u8; N])) {
+        let bits = u128::from(self.length).wrapping_mul(8).to_be_bytes();
+        let length = bits.get(bits.len().saturating_sub(L)..).unwrap_or(&bits);
         let mut tail = self.block.iter_mut().skip(self.filled);
         if let Some(first) = tail.next() {
             *first = 0x80;

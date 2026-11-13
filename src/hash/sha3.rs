@@ -1,62 +1,20 @@
 //! SHA3-256 and SHA3-512 (FIPS 202 §6.1): the Keccak-f\[1600\] permutation
 //! in a sponge, which the two use with different rates and output lengths.
 
-use super::{BlockBuffer, HashFunction};
+use super::BlockBuffer;
 
-/// SHA3-256 (FIPS 202 §6.1), with a 32-byte digest.
-#[derive(Debug, Clone)]
-pub struct Sha3_256(Sponge<136>);
-
-impl Default for Sha3_256 {
-    fn default() -> Sha3_256 {
-        <Sha3_256 as HashFunction>::new()
-    }
+hash_function! {
+    /// SHA3-256 (FIPS 202 §6.1), with a 32-byte digest.
+    Sha3_256(Sponge<136>) -> [u8; 32],
+    new: Sponge::new(),
+    output: write_lanes,
 }
 
-impl HashFunction for Sha3_256 {
-    type Output = [u8; 32];
-
-    fn new() -> Sha3_256 {
-        Sha3_256(Sponge::new())
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.0.update(data);
-    }
-
-    fn finalize(self) -> [u8; 32] {
-        let mut output = [0; 32];
-        write_lanes(&self.0.finish(), &mut output);
-        output
-    }
-}
-
-/// SHA3-512 (FIPS 202 §6.1), with a 64-byte digest.
-#[derive(Debug, Clone)]
-pub struct Sha3_512(Sponge<72>);
-
-impl Default for Sha3_512 {
-    fn default() -> Sha3_512 {
-        <Sha3_512 as HashFunction>::new()
-    }
-}
-
-impl HashFunction for Sha3_512 {
-    type Output = [u8; 64];
-
-    fn new() -> Sha3_512 {
-        Sha3_512(Sponge::new())
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.0.update(data);
-    }
-
-    fn finalize(self) -> [u8; 64] {
-        let mut output = [0; 64];
-        write_lanes(&self.0.finish(), &mut output);
-        output
-    }
+hash_function! {
+    /// SHA3-512 (FIPS 202 §6.1), with a 64-byte digest.
+    Sha3_512(Sponge<72>) -> [u8; 64],
+    new: Sponge::new(),
+    output: write_lanes,
 }
 
 /// The sponge construction over Keccak-f\[1600\] (FIPS 202 §4), absorbing

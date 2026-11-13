@@ -9,8 +9,6 @@ use super::{BlockBuffer, HashFunction, ch, maj, write_words};
 pub struct Sha1 {
     state: [u32; 5],
     buffer: BlockBuffer<64>,
-    /// The input length in bytes, modulo 2^64.
-    length: u64,
 }
 
 impl Default for Sha1 {
@@ -32,20 +30,17 @@ impl HashFunction for Sha1 {
                 0xC3D2_E1F0,
             ],
             buffer: BlockBuffer::new(),
-            length: 0,
         }
     }
 
     fn update(&mut self, data: &[u8]) {
-        self.length = self.length.wrapping_add(data.len() as u64);
         self.buffer
             .update(data, |block| compress(&mut self.state, block));
     }
 
     fn finalize(mut self) -> [u8; 20] {
-        let bits = self.length.wrapping_mul(8).to_be_bytes();
         self.buffer
-            .finish(&bits, |block| compress(&mut self.state, block));
+            .finish::<8>(|block| compress(&mut self.state, block));
         let mut output = [0; 20];
         write_words(&self.state, &mut output);
         output

@@ -1,80 +1,38 @@
 //! SHA2-384 and SHA2-512 (FIPS 180-4 §6.4 and §6.5), which differ only in
 //! their initial state and in how much of the final state they output.
 
-use super::{BlockBuffer, HashFunction, ch, maj, write_wide_words};
+use super::{BlockBuffer, ch, maj, write_wide_words};
 
-/// SHA2-384 (FIPS 180-4 §6.5), with a 48-byte digest.
-#[derive(Debug, Clone)]
-pub struct Sha384(Engine);
-
-impl Default for Sha384 {
-    fn default() -> Sha384 {
-        <Sha384 as HashFunction>::new()
-    }
+hash_function! {
+    /// SHA2-384 (FIPS 180-4 §6.5), with a 48-byte digest.
+    Sha384(Engine) -> [u8; 48],
+    new: Engine::new([
+        0xCBBB_9D5D_C105_9ED8,
+        0x629A_292A_367C_D507,
+        0x9159_015A_3070_DD17,
+        0x152F_ECD8_F70E_5939,
+        0x6733_2667_FFC0_0B31,
+        0x8EB4_4A87_6858_1511,
+        0xDB0C_2E0D_64F9_8FA7,
+        0x47B5_481D_BEFA_4FA4,
+    ]),
+    output: write_wide_words,
 }
 
-impl HashFunction for Sha384 {
-    type Output = [u8; 48];
-
-    fn new() -> Sha384 {
-        Sha384(Engine::new([
-            0xCBBB_9D5D_C105_9ED8,
-            0x629A_292A_367C_D507,
-            0x9159_015A_3070_DD17,
-            0x152F_ECD8_F70E_5939,
-            0x6733_2667_FFC0_0B31,
-            0x8EB4_4A87_6858_1511,
-            0xDB0C_2E0D_64F9_8FA7,
-            0x47B5_481D_BEFA_4FA4,
-        ]))
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.0.update(data);
-    }
-
-    fn finalize(self) -> [u8; 48] {
-        let mut output = [0; 48];
-        write_wide_words(&self.0.finish(), &mut output);
-        output
-    }
-}
-
-/// SHA2-512 (FIPS 180-4 §6.4), with a 64-byte digest.
-#[derive(Debug, Clone)]
-pub struct Sha512(Engine);
-
-impl Default for Sha512 {
-    fn default() -> Sha512 {
-        <Sha512 as HashFunction>::new()
-    }
-}
-
-impl HashFunction for Sha512 {
-    type Output = [u8; 64];
-
-    fn new() -> Sha512 {
-        Sha512(Engine::new([
-            0x6A09_E667_F3BC_C908,
-            0xBB67_AE85_84CA_A73B,
-            0x3C6E_F372_FE94_F82B,
-            0xA54F_F53A_5F1D_36F1,
-            0x510E_527F_ADE6_82D1,
-            0x9B05_688C_2B3E_6C1F,
-            0x1F83_D9AB_FB41_BD6B,
-            0x5BE0_CD19_137E_2179,
-        ]))
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.0.update(data);
-    }
-
-    fn finalize(self) -> [u8; 64] {
-        let mut output = [0; 64];
-        write_wide_words(&self.0.finish(), &mut output);
-        output
-    }
+hash_function! {
+    /// SHA2-512 (FIPS 180-4 §6.4), with a 64-byte digest.
+    Sha512(Engine) -> [u8; 64],
+    new: Engine::new([
+        0x6A09_E667_F3BC_C908,
+        0xBB67_AE85_84CA_A73B,
+        0x3C6E_F372_FE94_F82B,
+        0xA54F_F53A_5F1D_36F1,
+        0x510E_527F_ADE6_82D1,
+        0x9B05_688C_2B3E_6C1F,
+        0x1F83_D9AB_FB41_BD6B,
+        0x5BE0_CD19_137E_2179,
+    ]),
+    output: write_wide_words,
 }
 
 /// The computation SHA2-384 and SHA2-512 share.
@@ -82,9 +40,6 @@ impl HashFunction for Sha512 {
 struct Engine {
     state: [u64; 8],
     buffer: BlockBuffer<128>,
-    /// The input length in bytes, modulo 2^64. The padding records a 128-bit
-    /// length, but no input reaches 2^64 bytes.
-    length: u64,
 }
 
 impl Engine {
@@ -92,20 +47,19 @@ impl Engine {
         Engine {
             state,
             buffer: BlockBuffer::new(),
-            length: 0,
         }
     }
 
     fn update(&mut self, data: &[u8]) {
-        self.length = self.length.wrapping_add(data.len() as u64);
         self.buffer
             .update(data, |block| compress(&mut self.state, block));
     }
 
+    /// The state once the padded input has been compressed. The padding
+    /// records a 128-bit length; no input reaches 2^64 bytes.
     fn finish(mut self) -> [u64; 8] {
-        let bits = u128::from(self.length).wrapping_mul(8).to_be_bytes();
         self.buffer
-            .finish(&bits, |block| compress(&mut self.state, block));
+            .finish::<16>(|block| compress(&mut self.state, block));
         self.state
     }
 }

@@ -856,10 +856,7 @@ pub(crate) mod forge {
         pub(crate) fn sign(&self, signature_type: SignatureType, created: u32) -> Signing<'_> {
             let version = self.public.version();
             let fingerprint = [
-                &[match version {
-                    Version::V4 => 4,
-                    Version::V6 => 6,
-                }][..],
+                &[version.number()][..],
                 self.public.fingerprint().as_bytes(),
             ]
             .concat();

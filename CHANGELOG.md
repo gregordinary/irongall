@@ -15,6 +15,8 @@ public API changes, since a verifier's verdicts are part of its contract.
 
 - `policy::Reason::IntendedRecipient`, the reason a signature that names
   intended recipients is refused over a document.
+- `packet::Version::number`, the octet a version is on the wire, as each
+  wire number's `number` gives it.
 
 ### Changed
 

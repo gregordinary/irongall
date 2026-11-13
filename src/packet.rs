@@ -122,6 +122,27 @@ pub enum Version {
     V6,
 }
 
+impl Version {
+    /// The number on the wire: the octet a key or signature packet's body
+    /// begins with.
+    pub const fn number(self) -> u8 {
+        match self {
+            Version::V4 => 4,
+            Version::V6 => 6,
+        }
+    }
+
+    /// The version whose number on the wire is `number`, or `None` for one
+    /// irongall does not read.
+    pub(crate) const fn from_number(number: u8) -> Option<Version> {
+        match number {
+            4 => Some(Version::V4),
+            6 => Some(Version::V6),
+            _ => None,
+        }
+    }
+}
+
 /// One packet, its body borrowed from the input it was read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Packet<'a> {

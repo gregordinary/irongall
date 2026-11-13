@@ -568,6 +568,8 @@ impl core::panic::unwind_safe::UnwindSafe for irongall::packet::PacketErrorKind
 #[non_exhaustive] pub enum irongall::packet::Version
 pub irongall::packet::Version::V4
 pub irongall::packet::Version::V6
+impl irongall::packet::Version
+pub const fn irongall::packet::Version::number(self) -> u8
 impl core::marker::Freeze for irongall::packet::Version
 impl core::marker::Send for irongall::packet::Version
 impl core::marker::Sync for irongall::packet::Version

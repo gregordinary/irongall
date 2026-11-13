@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use irongall::armor;
-use irongall::packet::{self, PacketErrorKind, Tag, Version};
+use irongall::packet::{self, PacketErrorKind, Tag};
 use irongall::signature::{Signature, SignatureMaterial, Subpacket};
 
 /// A subpacket as `gpg --list-packets` lists it.
@@ -126,14 +126,6 @@ fn bits(value: &[u8]) -> usize {
     }
 }
 
-fn version_number(version: Version) -> u8 {
-    match version {
-        Version::V4 => 4,
-        Version::V6 => 6,
-        other => panic!("unexpected version {other:?}"),
-    }
-}
-
 /// The subpacket types irongall honors when they are marked critical.
 const HONORED: [u8; 18] = [
     2, 3, 9, 16, 25, 27, 29, 32, 33, 11, 21, 22, 23, 24, 26, 28, 30, 39,
@@ -201,11 +193,7 @@ fn signatures_read_as_gnupg_reads_them() {
             }
 
             let signature = signature.unwrap();
-            assert_eq!(
-                version_number(signature.version()),
-                listed.version,
-                "{file}"
-            );
+            assert_eq!(signature.version().number(), listed.version, "{file}");
             assert_eq!(
                 signature.signature_type().number(),
                 listed.signature_type,
@@ -234,7 +222,7 @@ fn signatures_read_as_gnupg_reads_them() {
                 .iter()
                 .map(|embedded| {
                     [
-                        version_number(embedded.version()),
+                        embedded.version().number(),
                         embedded.signature_type().number(),
                         embedded.public_key_algorithm().number(),
                         embedded.hash_algorithm().number(),

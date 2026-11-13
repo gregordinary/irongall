@@ -442,10 +442,7 @@ impl Signature {
     /// version through its hashed subpackets, then the version again, `0xFF`,
     /// and the length of those fields in four octets, modulo 2^32.
     fn hash_trailer(&self, context: &mut Context) {
-        let version = match self.version {
-            Version::V4 => 4,
-            Version::V6 => 6,
-        };
+        let version = self.version.number();
         // A packet's body is at most 2^32 - 1 octets, so this never wraps.
         let hashed_fields = self.hashed_fields();
         let length = u32::try_from(hashed_fields.len()).unwrap_or(u32::MAX);

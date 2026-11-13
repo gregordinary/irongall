@@ -23,7 +23,7 @@ use std::fmt;
 use std::io::Read as _;
 
 use irongall::key::{KeyMaterial, PublicKeyAlgorithm};
-use irongall::packet::{self, Packet, PacketError, PacketErrorKind, Tag, Version};
+use irongall::packet::{self, Packet, PacketError, PacketErrorKind, Tag};
 use irongall::signature::{SignatureMaterial, SignatureType, Subject, SubpacketType, VerifyError};
 use pgp::packet::{PacketHeader, PacketParser, SignatureVersionSpecific};
 use pgp::ser::Serialize as _;
@@ -390,15 +390,6 @@ fn reencoded(rpgp: &pgp::packet::Signature, body: &[u8]) -> bool {
     area != Some(&encoded[..])
 }
 
-/// The octet a version is on the wire.
-fn version_number(version: Version) -> u8 {
-    match version {
-        Version::V4 => 4,
-        Version::V6 => 6,
-        other => panic!("a version irongall does not read: {other:?}"),
-    }
-}
-
 /// Checks that the two read the same key. The fingerprint is compared only
 /// where rPGP encodes the key as the octets it read: it fingerprints its own
 /// encoding, and RFC 9580 §5.5.4 the packet as it is.
@@ -409,7 +400,7 @@ fn same_key(
 ) -> Result<(), Disagreement> {
     same(
         "a key's version",
-        version_number(ours.version()),
+        ours.version().number(),
         u8::from(theirs.version()),
     )?;
     same(
@@ -475,12 +466,12 @@ fn same_signature(
     let Some(config) = theirs.config() else {
         return Err(Disagreement(format!(
             "irongall reads a version {} signature rPGP does not",
-            version_number(ours.version())
+            ours.version().number()
         )));
     };
     same(
         "a signature's version",
-        version_number(ours.version()),
+        ours.version().number(),
         u8::from(theirs.version()),
     )?;
     same(

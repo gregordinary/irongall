@@ -289,11 +289,8 @@ impl Signature {
         let mut body = fields.clone();
         let at = fields.offset();
         let within = |fields: &Fields<'_>| fields.offset().saturating_sub(at);
-        let version = match fields.u8()? {
-            4 => Version::V4,
-            6 => Version::V6,
-            _ => return Err(fields.error_at(PacketErrorKind::UnsupportedVersion, at)),
-        };
+        let version = Version::from_number(fields.u8()?)
+            .ok_or_else(|| fields.error_at(PacketErrorKind::UnsupportedVersion, at))?;
         let signature_type = SignatureType(fields.u8()?);
         let public_key_algorithm = PublicKeyAlgorithm(fields.u8()?);
         let hash_algorithm = HashAlgorithm(fields.u8()?);

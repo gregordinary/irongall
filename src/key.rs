@@ -199,11 +199,8 @@ fn read(
     mut fields: Fields<'_>,
 ) -> Result<(Version, u32, PublicKeyAlgorithm, KeyMaterial<'_>), PacketError> {
     let at = fields.offset();
-    let version = match fields.u8()? {
-        4 => Version::V4,
-        6 => Version::V6,
-        _ => return Err(fields.error_at(PacketErrorKind::UnsupportedVersion, at)),
-    };
+    let version = Version::from_number(fields.u8()?)
+        .ok_or_else(|| fields.error_at(PacketErrorKind::UnsupportedVersion, at))?;
     let creation_time = fields.u32()?;
     let algorithm = PublicKeyAlgorithm(fields.u8()?);
     let material = match version {

@@ -9,7 +9,7 @@ caller must act on is prefixed **Breaking.**
 A change to what irongall accepts is recorded even when no signature of the
 public API changes, since a verifier's verdicts are part of its contract.
 
-## [Unreleased]
+## [0.2.0] - 2026-11-13
 
 ### Added
 
@@ -210,6 +210,7 @@ The first release.
   with their fingerprints and key IDs, signatures and their subpackets,
   certificates, and the hash functions.
 
+[0.2.0]: https://github.com/gregordinary/irongall/releases/tag/v0.2.0
 [0.1.2]: https://github.com/gregordinary/irongall/releases/tag/v0.1.2
 [0.1.1]: https://github.com/gregordinary/irongall/releases/tag/v0.1.1
 [0.1.0]: https://github.com/gregordinary/irongall/releases/tag/v0.1.0

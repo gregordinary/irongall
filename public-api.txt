@@ -902,6 +902,9 @@ pub fn irongall::signature::Signature::version(&self) -> irongall::packet::Versi
 impl irongall::signature::Signature
 pub fn irongall::signature::Signature::document_hash(&self) -> core::result::Result<irongall::signature::DocumentHash<'_>, irongall::signature::VerifyError>
 pub fn irongall::signature::Signature::verify(&self, &irongall::key::PublicKey, irongall::signature::Subject<'_>) -> core::result::Result<(), irongall::signature::VerifyError>
+impl core::cmp::Eq for irongall::signature::Signature
+impl core::cmp::PartialEq for irongall::signature::Signature
+pub fn irongall::signature::Signature::eq(&self, &irongall::signature::Signature) -> bool
 impl core::fmt::Debug for irongall::signature::Signature
 pub fn irongall::signature::Signature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for irongall::signature::Signature

@@ -860,6 +860,26 @@ fn signatures_are_equal_when_their_bodies_are() {
     assert_eq!(nine.length(), sixteen.length());
     assert_ne!(nine, sixteen);
     assert_eq!(nine, read(&[0x00, 0x09, 0x00, 0xC5]));
+
+    // Inside the crate, a body read honored and read with what irongall
+    // cannot honor overlooked are two readings.
+    let body = body(4, 0, 1, 8, &created(), &[], &[0x00, 0x09, 0x00, 0xC5]);
+    let overlooked = parse_with(&body, Signature::from_packet_unhonored).unwrap();
+    assert_ne!(nine, overlooked);
+    assert_eq!(
+        overlooked,
+        parse_with(&body, Signature::from_packet_unhonored).unwrap()
+    );
+
+    // An embedded signature is equal to its body read as a packet, though
+    // its own embedded signatures are not read.
+    let inner = v4(&created(), &subpacket(32, &v4(&created(), &[])));
+    let outer = parse(&v4(&created(), &subpacket(32, &inner))).unwrap();
+    let packet = parse(&inner).unwrap();
+    let embedded = &outer.embedded_signatures()[0];
+    assert_eq!(packet.embedded_signatures().len(), 1);
+    assert!(embedded.embedded_signatures().is_empty());
+    assert_eq!(*embedded, packet);
 }
 
 /// A signature's `Debug` form shows what the accessors read from its body,

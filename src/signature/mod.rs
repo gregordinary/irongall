@@ -187,7 +187,7 @@ pub enum SignatureMaterial<'a> {
 ///
 /// Its [`Debug`](fmt::Debug) form shows what the accessors read from the
 /// body, not the body's octets.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Signature {
     /// The body: from the version through the material, and, for a
     /// signature read with what irongall cannot honor overlooked, any octets
@@ -217,6 +217,20 @@ pub struct Signature {
     /// taken for an empty one.
     unhashed_read: bool,
 }
+
+/// Compares the bodies, and how each was read: inside the crate, one body
+/// read as irongall honors it and read with what it cannot honor overlooked
+/// are two readings, whose accessors may read different material. All else a
+/// signature holds is read from its body. An embedded signature's own
+/// embedded signatures are not read, so it is equal to the same body read as
+/// a Signature packet, whose are.
+impl PartialEq for Signature {
+    fn eq(&self, other: &Signature) -> bool {
+        self.body == other.body && self.unhonored == other.unhonored
+    }
+}
+
+impl Eq for Signature {}
 
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

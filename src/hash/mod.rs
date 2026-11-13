@@ -548,7 +548,7 @@ fn write_wide_words<const N: usize>(words: &[u64], output: &mut [u8; N]) {
     }
 }
 
-/// The SHA-1 and SHA-256 choice function: each bit of `x` selects the bit of
+/// The SHA-1 and SHA-2 choice function: each bit of `x` selects the bit of
 /// `y` or of `z`.
 fn ch<T>(x: T, y: T, z: T) -> T
 where
@@ -560,7 +560,7 @@ where
     (x & y) ^ (!x & z)
 }
 
-/// The SHA-1 and SHA-256 majority function: each bit is the majority of the
+/// The SHA-1 and SHA-2 majority function: each bit is the majority of the
 /// three inputs' bits.
 fn maj<T>(x: T, y: T, z: T) -> T
 where

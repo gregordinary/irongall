@@ -59,7 +59,9 @@
 //!   certificate already holds, with the same packet body, continues that
 //!   one instead.
 //! - A User Attribute packet begins something irongall does not read, and
-//!   the signatures after it are passed over with it.
+//!   the signatures after it are passed over with it, but for the
+//!   certificate's own statements among them, which are kept, as the
+//!   paragraphs below set out.
 //! - Trust, Marker, and Padding packets, and packets of a type that is unknown
 //!   and not critical (RFC 9580 §4.3), are passed over wherever they are.
 //!

@@ -158,7 +158,9 @@ and a case in `divergences.rs` that produces it.
   operators carries the `expect`. Tests are exempt.
 - **Bounded work.** A length read from input is checked against the bytes
   remaining before anything is allocated for it. Parsing is linear in its
-  input and never recurses on its structure. Judging is linear too: a
+  input, but for the sort that finds a certificate's repeated user IDs and
+  subkeys and a keyring's repeated certificates, and never recurses on its
+  structure. Judging is linear too: a
   subject hashed for each signature over it, such as a user ID, a subkey,
   or a version 6 primary key, is bounded in size before any of those
   signatures is verified, or hashed once for all of them, and work that

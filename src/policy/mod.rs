@@ -891,18 +891,6 @@ fn of_type<'s>(
         .filter(move |(signature, _)| signature_type(signature.signature_type()))
 }
 
-/// Whether `signature_type` is a certification of a user ID (0x10 to 0x13),
-/// as opposed to a revocation of one.
-fn is_certification(signature_type: SignatureType) -> bool {
-    matches!(
-        signature_type,
-        SignatureType::GENERIC_CERTIFICATION
-            | SignatureType::PERSONA_CERTIFICATION
-            | SignatureType::CASUAL_CERTIFICATION
-            | SignatureType::POSITIVE_CERTIFICATION
-    )
-}
-
 /// The certification revocations among `statements`.
 fn certification_revocations<'s>(
     statements: &[Statement<'s>],
@@ -1053,7 +1041,10 @@ impl<'a> Governing<'a> {
         )
         .collect();
         for (user_id, over_user_id) in certificate.user_ids().iter().zip(&statements.user_ids) {
-            let governing = govern(of_type(over_user_id, is_certification), &made);
+            let governing = govern(
+                of_type(over_user_id, SignatureType::is_certification),
+                &made,
+            );
             in_force.extend(SelfSignature::in_force(
                 governing,
                 Some(user_id),

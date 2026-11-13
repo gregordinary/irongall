@@ -136,7 +136,7 @@ use core::mem;
 
 use crate::key::PublicKey;
 use crate::packet::{self, Packet, PacketError, PacketErrorKind, Packets, Tag};
-use crate::signature::{Signature, SignatureType};
+use crate::signature::{Signature, SubjectKind, statement_kinds};
 
 /// A certificate, also called a transferable public key: a primary key, the
 /// signatures over it, and its user IDs and subkeys with theirs.
@@ -723,30 +723,22 @@ impl Assembly {
             },
         };
         let honored = refusal.is_none();
-        // Matched first, so that one placed with the primary key wherever it
-        // is escapes something passed over whether it is honored or not.
-        let place = match (signature.signature_type(), self.place) {
-            (SignatureType::DIRECT_KEY | SignatureType::KEY_REVOCATION, _)
-            | (
-                SignatureType::CERTIFICATION_REVOCATION,
-                Place::Primary | Place::Subkey(_) | Place::PassedOver,
-            ) => Some(Place::Primary),
-            (
-                SignatureType::GENERIC_CERTIFICATION
-                | SignatureType::PERSONA_CERTIFICATION
-                | SignatureType::CASUAL_CERTIFICATION
-                | SignatureType::POSITIVE_CERTIFICATION
-                | SignatureType::CERTIFICATION_REVOCATION,
-                place @ Place::UserId(_),
-            )
-            | (
-                SignatureType::SUBKEY_BINDING | SignatureType::SUBKEY_REVOCATION,
-                place @ Place::Subkey(_),
-            ) => Some(place),
+        let kinds = statement_kinds(signature.signature_type()).unwrap_or_default();
+        let over = |kind| kinds.contains(&kind);
+        let place = match self.place {
+            // A certification revocation after a user ID may be over the
+            // user ID or the primary key alone, and is placed with the user
+            // ID, where the policy weighs it as both.
+            place @ Place::UserId(_) if over(SubjectKind::UserId) => Some(place),
+            // Matched before what is passed over, so that a statement that
+            // may be over the primary key alone escapes it, whether it is
+            // honored or not.
+            _ if over(SubjectKind::Key) => Some(Place::Primary),
+            place @ Place::Subkey(_) if over(SubjectKind::Subkey) => Some(place),
             // The signatures of something passed over go with it, and are
             // not recorded as passed over themselves, but a statement among
             // them is kept, since the policy places it by what it is over.
-            (_, Place::PassedOver) => {
+            Place::PassedOver => {
                 self.unplace(signature);
                 return;
             }
@@ -770,21 +762,15 @@ impl Assembly {
     }
 
     /// Keeps `signature`, placed with no part, if it is a statement over a
-    /// user ID or a subkey: a certification, a subkey binding, or a subkey
-    /// revocation. A certification revocation is never unplaced, since one
+    /// user ID or a subkey alone: a certification, a subkey binding, or a
+    /// subkey revocation. A statement that may be over the primary key alone,
+    /// a certification revocation among them, is never unplaced, since one
     /// that follows no user ID is placed with the primary key.
     fn unplace(&mut self, signature: Signature) {
-        if !matches!(
-            signature.signature_type(),
-            SignatureType::GENERIC_CERTIFICATION
-                | SignatureType::PERSONA_CERTIFICATION
-                | SignatureType::CASUAL_CERTIFICATION
-                | SignatureType::POSITIVE_CERTIFICATION
-                | SignatureType::SUBKEY_BINDING
-                | SignatureType::SUBKEY_REVOCATION
-        ) {
-            return;
+        if statement_kinds(signature.signature_type())
+            .is_some_and(|kinds| !kinds.contains(&SubjectKind::Key))
+        {
+            self.parts.unplaced.push(signature);
         }
-        self.parts.unplaced.push(signature);
     }
 }

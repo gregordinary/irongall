@@ -55,7 +55,7 @@ pub enum Subject<'a> {
 
 /// The kind of a [`Subject`], which a signature's type decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum SubjectKind {
     Document,
     Key,
     UserId,
@@ -63,12 +63,12 @@ enum Kind {
 }
 
 impl Subject<'_> {
-    fn kind(&self) -> Kind {
+    fn kind(&self) -> SubjectKind {
         match self {
-            Subject::Document(_) => Kind::Document,
-            Subject::Key(_) => Kind::Key,
-            Subject::UserId { .. } => Kind::UserId,
-            Subject::Subkey { .. } => Kind::Subkey,
+            Subject::Document(_) => SubjectKind::Document,
+            Subject::Key(_) => SubjectKind::Key,
+            Subject::UserId { .. } => SubjectKind::UserId,
+            Subject::Subkey { .. } => SubjectKind::Subkey,
         }
     }
 }
@@ -78,20 +78,32 @@ impl Subject<'_> {
 ///
 /// A certification revocation is made over the same data as the signature it
 /// revokes (RFC 9580 §5.2.1.13): a certification, or a direct-key signature.
-fn kinds(signature_type: SignatureType) -> Option<&'static [Kind]> {
+fn kinds(signature_type: SignatureType) -> Option<&'static [SubjectKind]> {
     Some(match signature_type {
-        SignatureType::BINARY | SignatureType::TEXT => &[Kind::Document],
-        SignatureType::GENERIC_CERTIFICATION
-        | SignatureType::PERSONA_CERTIFICATION
-        | SignatureType::CASUAL_CERTIFICATION
-        | SignatureType::POSITIVE_CERTIFICATION => &[Kind::UserId],
+        SignatureType::BINARY | SignatureType::TEXT => &[SubjectKind::Document],
+        certification if certification.is_certification() => &[SubjectKind::UserId],
         SignatureType::SUBKEY_BINDING
         | SignatureType::PRIMARY_KEY_BINDING
-        | SignatureType::SUBKEY_REVOCATION => &[Kind::Subkey],
-        SignatureType::DIRECT_KEY | SignatureType::KEY_REVOCATION => &[Kind::Key],
-        SignatureType::CERTIFICATION_REVOCATION => &[Kind::UserId, Kind::Key],
+        | SignatureType::SUBKEY_REVOCATION => &[SubjectKind::Subkey],
+        SignatureType::DIRECT_KEY | SignatureType::KEY_REVOCATION => &[SubjectKind::Key],
+        SignatureType::CERTIFICATION_REVOCATION => &[SubjectKind::UserId, SubjectKind::Key],
         _ => return None,
     })
+}
+
+/// The kinds of part of a certificate a statement of `signature_type` by its
+/// primary key may be over: the primary key alone, a user ID, or a subkey.
+/// `None` for a type that is no such statement: one over a document, one
+/// irongall verifies over nothing, and a back-signature (0x19), which a
+/// subkey makes.
+///
+/// Placing a certificate's signatures, and searching for what one placed
+/// elsewhere is over, both ask this.
+pub(crate) fn statement_kinds(signature_type: SignatureType) -> Option<&'static [SubjectKind]> {
+    if signature_type == SignatureType::PRIMARY_KEY_BINDING {
+        return None;
+    }
+    kinds(signature_type).filter(|kinds| !kinds.contains(&SubjectKind::Document))
 }
 
 /// Why a signature does not verify.
@@ -271,7 +283,7 @@ impl Signature {
     /// or [`VerifyError::UnsupportedType`]. When its hash algorithm is one
     /// irongall does not implement: [`VerifyError::UnsupportedHash`].
     pub fn document_hash(&self) -> Result<DocumentHash<'_>, VerifyError> {
-        self.check_subject(Kind::Document)?;
+        self.check_subject(SubjectKind::Document)?;
         Ok(DocumentHash {
             signature: self,
             context: self.context()?,
@@ -280,7 +292,7 @@ impl Signature {
     }
 
     /// Checks that the signature's type is made over a subject of `kind`.
-    fn check_subject(&self, kind: Kind) -> Result<(), VerifyError> {
+    fn check_subject(&self, kind: SubjectKind) -> Result<(), VerifyError> {
         if kinds(self.signature_type)
             .ok_or(VerifyError::UnsupportedType)?
             .contains(&kind)
@@ -476,11 +488,11 @@ pub(crate) enum Over<'a> {
 }
 
 impl Over<'_> {
-    fn kind(self) -> Kind {
+    fn kind(self) -> SubjectKind {
         match self {
-            Over::Key => Kind::Key,
-            Over::UserId(_) => Kind::UserId,
-            Over::Subkey(_) => Kind::Subkey,
+            Over::Key => SubjectKind::Key,
+            Over::UserId(_) => SubjectKind::UserId,
+            Over::Subkey(_) => SubjectKind::Subkey,
         }
     }
 }

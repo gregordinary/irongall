@@ -30,7 +30,10 @@ use alloc::vec::Vec;
 
 use super::Policy;
 use crate::cert::Certificate;
-use crate::signature::{Over, Prefix, PrimaryChecks, Signature, SignatureType, VerifyError};
+use crate::signature::{
+    Over, Prefix, PrimaryChecks, Signature, SignatureType, SubjectKind, VerifyError,
+    statement_kinds,
+};
 
 /// How many octets judging a certificate may hash searching for the parts
 /// its signatures are over, for each octet of its signatures.
@@ -256,15 +259,13 @@ impl<'a> Search<'a> {
             if !checks.may_have_made(signature) {
                 continue;
             }
-            let signature_type = signature.signature_type();
-            let parts: &[(Part, Over<'a>)] = match signature_type {
-                SignatureType::GENERIC_CERTIFICATION
-                | SignatureType::PERSONA_CERTIFICATION
-                | SignatureType::CASUAL_CERTIFICATION
-                | SignatureType::POSITIVE_CERTIFICATION
-                | SignatureType::CERTIFICATION_REVOCATION => &self.user_ids,
-                SignatureType::SUBKEY_BINDING | SignatureType::SUBKEY_REVOCATION => &self.subkeys,
-                _ => &[],
+            let kinds = statement_kinds(signature.signature_type()).unwrap_or_default();
+            let parts: &[(Part, Over<'a>)] = if kinds.contains(&SubjectKind::UserId) {
+                &self.user_ids
+            } else if kinds.contains(&SubjectKind::Subkey) {
+                &self.subkeys
+            } else {
+                &[]
             };
             // A certification revocation is placed with a user ID or with
             // the primary key, and was tried over the primary key alone

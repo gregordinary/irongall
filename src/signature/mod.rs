@@ -91,7 +91,9 @@ pub use subpacket::{
     KeyFlags, RevocationCode, RevocationReason, Subpacket, SubpacketType, Subpackets,
 };
 pub use verify::{DocumentHash, Subject, VerifyError};
-pub(crate) use verify::{Over, Prefix, PrimaryChecks, check_verifying_key};
+pub(crate) use verify::{
+    Over, Prefix, PrimaryChecks, SubjectKind, check_verifying_key, statement_kinds,
+};
 
 use crate::hash::HashAlgorithm;
 use crate::key::{Fingerprint, KeyId, PublicKeyAlgorithm};
@@ -139,6 +141,20 @@ wire_number! {
     const TIMESTAMP = 0x40, "Timestamp Signature";
     /// A signature over another signature (0x50).
     const THIRD_PARTY_CONFIRMATION = 0x50, "Third-Party Confirmation Signature";
+}
+
+impl SignatureType {
+    /// Whether the type is a certification of a user ID (0x10 to 0x13), as
+    /// opposed to a revocation of one.
+    pub(crate) const fn is_certification(self) -> bool {
+        matches!(
+            self,
+            SignatureType::GENERIC_CERTIFICATION
+                | SignatureType::PERSONA_CERTIFICATION
+                | SignatureType::CASUAL_CERTIFICATION
+                | SignatureType::POSITIVE_CERTIFICATION
+        )
+    }
 }
 
 /// A signature's material, for the algorithms irongall verifies with.

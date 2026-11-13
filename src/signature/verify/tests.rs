@@ -5,7 +5,10 @@
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
-use super::{Kind, LineEndings, Over, Prefix, PrimaryChecks, Subject, VerifyError, kinds};
+use super::{
+    LineEndings, Over, Prefix, PrimaryChecks, Subject, SubjectKind, VerifyError, kinds,
+    statement_kinds,
+};
 use crate::armor;
 use crate::cert::{self, Certificate};
 use crate::hash::{Context, Digest, HashAlgorithm, HashFunction as _, Sha256};
@@ -243,18 +246,18 @@ fn gnupg_signatures() {
 #[test]
 fn signature_types_and_their_subjects() {
     for (number, expected) in [
-        (0x00, Some(&[Kind::Document][..])),
-        (0x01, Some(&[Kind::Document])),
-        (0x10, Some(&[Kind::UserId])),
-        (0x11, Some(&[Kind::UserId])),
-        (0x12, Some(&[Kind::UserId])),
-        (0x13, Some(&[Kind::UserId])),
-        (0x18, Some(&[Kind::Subkey])),
-        (0x19, Some(&[Kind::Subkey])),
-        (0x1F, Some(&[Kind::Key])),
-        (0x20, Some(&[Kind::Key])),
-        (0x28, Some(&[Kind::Subkey])),
-        (0x30, Some(&[Kind::UserId, Kind::Key])),
+        (0x00, Some(&[SubjectKind::Document][..])),
+        (0x01, Some(&[SubjectKind::Document])),
+        (0x10, Some(&[SubjectKind::UserId])),
+        (0x11, Some(&[SubjectKind::UserId])),
+        (0x12, Some(&[SubjectKind::UserId])),
+        (0x13, Some(&[SubjectKind::UserId])),
+        (0x18, Some(&[SubjectKind::Subkey])),
+        (0x19, Some(&[SubjectKind::Subkey])),
+        (0x1F, Some(&[SubjectKind::Key])),
+        (0x20, Some(&[SubjectKind::Key])),
+        (0x28, Some(&[SubjectKind::Subkey])),
+        (0x30, Some(&[SubjectKind::UserId, SubjectKind::Key])),
         (0x02, None),
         (0x40, None),
         (0x50, None),
@@ -263,6 +266,26 @@ fn signature_types_and_their_subjects() {
     ] {
         assert_eq!(kinds(SignatureType(number)), expected, "{number:#04X}");
     }
+
+    // A certificate's own statements are those over a part of it, but for
+    // the back-signature, which the subkey makes; and the certifications
+    // are the four types over a user ID alone.
+    let mut statements = 0;
+    for number in 0..=u8::MAX {
+        let signature_type = SignatureType(number);
+        let expected = match number {
+            0x19 => None,
+            _ => kinds(signature_type).filter(|kinds| *kinds != [SubjectKind::Document]),
+        };
+        assert_eq!(statement_kinds(signature_type), expected, "{number:#04X}");
+        statements += usize::from(expected.is_some());
+        assert_eq!(
+            signature_type.is_certification(),
+            (0x10..=0x13).contains(&number),
+            "{number:#04X}"
+        );
+    }
+    assert_eq!(statements, 9);
 
     // Through `verify`: the A.2 signature retyped, against each kind of
     // subject.

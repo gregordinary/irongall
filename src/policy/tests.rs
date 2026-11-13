@@ -1504,6 +1504,66 @@ fn a_key_the_policy_refuses_cannot_sign() {
     }
 }
 
+/// A primary key irongall does not verify with grants nothing, and the
+/// certificate's statements are not hashed over it, though a version 6 key
+/// is hashed for each statement and a refused one may be as long as its
+/// packet. One irongall verifies with, though the policy refuses it, is
+/// still judged in full, so that a revocation it made is found.
+#[test]
+fn an_unverifiable_primary_key_is_refused_before_its_statements_are_hashed() {
+    let rsa = Key::rsa(Version::V6, CREATED);
+    // The widest modulus a packet can state, 65535 bits, exactly.
+    let mut modulus = vec![0x5A; 8192];
+    modulus[0] = 0x7F;
+    *modulus.last_mut().unwrap() |= 1;
+    let material = [&[0xFF, 0xFF][..], &modulus, &[0, 17, 1, 0, 1]].concat();
+    let body = [
+        &[6][..],
+        &CREATED.to_be_bytes(),
+        &[1],
+        &u32::try_from(material.len()).unwrap().to_be_bytes(),
+        &material,
+    ]
+    .concat();
+    let wide = Key::with_body(&rsa, &body);
+    assert!(!Policy::new().accepts_key(wide.public()));
+    let mut packets = vec![wide.primary(), forge::user_id(USER_ID)];
+    for created in 0..100 {
+        packets.push(certification(&wide, CREATED + created, None, None));
+    }
+    let packets: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
+    let certificate = forge::certificate(&packets);
+    let (authority, work) = work::of(|| Authority::new(&certificate, &Policy::new(), NOW));
+    assert_eq!(authority.lapse(), Err(Reason::WeakPrimaryKey));
+    assert_eq!(authority.primary_user_id(), None);
+    assert_eq!(work.hashed, 0);
+    assert_eq!(work.operations, 0);
+
+    // A primary key the policy refuses for its width alone is judged, and
+    // its revocation found.
+    let rsa = Key::rsa(Version::V4, CREATED);
+    let narrow = Policy::new().with_rsa_minimum_bits(3072);
+    let certificate = archive(&rsa, &ed25519(2));
+    let judged = Authority::new(&certificate, &narrow, NOW);
+    assert_eq!(judged.lapse(), Err(Reason::WeakPrimaryKey));
+    assert!(
+        judged
+            .signers()
+            .all(|(_, standing)| standing == Err(Reason::WeakPrimaryKey))
+    );
+    let revoked = forge::certificate(&[
+        &rsa.primary(),
+        &rsa.sign(SignatureType::KEY_REVOCATION, CREATED + DAY)
+            .over_key(&rsa),
+        &forge::user_id(USER_ID),
+        &certification(&rsa, CREATED, Some(CERTIFY | SIGN), None),
+    ]);
+    assert_eq!(
+        Authority::new(&revoked, &narrow, NOW).lapse(),
+        Err(Reason::CertificateRevoked)
+    );
+}
+
 /// Judging a certificate prepares its primary key for the arithmetic of
 /// its equations once, however many statements it checks, and a subkey once
 /// for all the back-signatures its bindings embed.

@@ -69,6 +69,11 @@ public API changes, since a verifier's verdicts are part of its contract.
   and encrypted message verified as a detached signature over its content.
   One marked critical was, and is, refused as a critical subpacket irongall
   does not honor.
+- A certificate whose primary key irongall does not verify with grants
+  nothing, as before, and its statements are no longer hashed over the key
+  first. A version 6 primary key is hashed for each statement, and one
+  irongall refuses may be about 16 KB long, so judging such a certificate
+  could hash 184 octets for each octet of its signatures.
 
 ## [0.1.2] - 2026-11-10
 

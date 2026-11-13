@@ -698,6 +698,14 @@ impl<'a> Authority<'a> {
     /// judges a certificate only once one of its keys has made a signature
     /// on the document.
     pub fn new(certificate: &'a Certificate, policy: &Policy, now: u64) -> Authority<'a> {
+        // No statement verifies with a primary key irongall does not verify
+        // with, so none can be found, revocations included, and the
+        // certificate grants nothing. Its statements are not hashed over
+        // it: a version 6 primary key is hashed for each, and such a key may
+        // be as long as its packet.
+        if signature::check_verifying_key(certificate.primary()).is_err() {
+            return Authority::refused(certificate, Reason::WeakPrimaryKey);
+        }
         let statements = Statements::of(certificate, policy);
         let governing = Governing::of(certificate, &statements, policy, now);
         let anchor = anchor(certificate, &governing, policy);
@@ -729,6 +737,17 @@ impl<'a> Authority<'a> {
             lapse: anchor,
             standings,
             primary_user_id: governing.primary_user_id(policy),
+        }
+    }
+
+    /// What a certificate that grants nothing, for `reason`, grants: no key
+    /// any window, and no primary user ID.
+    fn refused(certificate: &'a Certificate, reason: Reason) -> Authority<'a> {
+        Authority {
+            certificate,
+            lapse: Err(reason),
+            standings: keys(certificate).map(|_| Err(reason)).collect(),
+            primary_user_id: None,
         }
     }
 

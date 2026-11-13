@@ -861,3 +861,28 @@ fn signatures_are_equal_when_their_bodies_are() {
     assert_ne!(nine, sixteen);
     assert_eq!(nine, read(&[0x00, 0x09, 0x00, 0xC5]));
 }
+
+/// A signature's `Debug` form shows what the accessors read from its body,
+/// each area's subpackets and the material among them, rather than where it
+/// keeps them.
+#[test]
+fn debug_shows_what_the_accessors_read() {
+    let issuer = subpacket(16, &[0x77; 8]);
+    let signature = parse(&v6(&created(), &issuer)).unwrap();
+    let shown = format!("{signature:?}");
+    let unhashed = format!("{:?}", signature.unhashed_subpackets());
+    let only = signature.unhashed_subpackets().next().unwrap();
+    assert_eq!(unhashed, format!("[{only:?}]"));
+    for field in [
+        format!("unhashed_subpackets: {unhashed}"),
+        format!("hashed_subpackets: {:?}", signature.hashed_subpackets()),
+        format!("salt: {:?}", signature.salt()),
+        format!("material: {:?}", signature.material()),
+        "honored: true".to_string(),
+    ] {
+        assert!(shown.contains(&field), "{field} in {shown}");
+    }
+    for kept in ["hashed_end", "material_start", "unhashed_read"] {
+        assert!(!shown.contains(kept), "{kept} in {shown}");
+    }
+}

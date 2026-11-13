@@ -164,13 +164,23 @@ impl<'a> Header<'a> {
 }
 
 /// One armored block, decoded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Armor {
     label: Label,
     /// The armor header lines, as read, each ended by an LF, which no line
     /// holds.
     headers: Box<str>,
     data: Box<[u8]>,
+}
+
+impl fmt::Debug for Armor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Armor")
+            .field("label", &self.label)
+            .field("headers", &self.headers())
+            .field("data", &self.data)
+            .finish()
+    }
 }
 
 impl Armor {
@@ -204,9 +214,17 @@ impl Armor {
 
 /// The armor headers of an [`Armor`], in the order they appear: see
 /// [`Armor::headers`].
-#[derive(Debug, Clone)]
+///
+/// Its [`Debug`](fmt::Debug) form lists the headers that remain.
+#[derive(Clone)]
 pub struct Headers<'a> {
     lines: core::str::SplitTerminator<'a, char>,
+}
+
+impl fmt::Debug for Headers<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.clone()).finish()
+    }
 }
 
 impl<'a> Iterator for Headers<'a> {
@@ -762,6 +780,18 @@ mod tests {
             "-----BEGIN PGP SIGNATURE-----\n\n{}\n-----END PGP SIGNATURE-----\n",
             data.join("\n")
         )
+    }
+
+    /// An armored block's `Debug` form lists its headers, as the headers
+    /// iterator gives them.
+    #[test]
+    fn debug_lists_the_headers() {
+        let input = "-----BEGIN PGP SIGNATURE-----\nComment: one\nVersion:\n\nZm9v\n\
+                     -----END PGP SIGNATURE-----\n";
+        let armor = decode(input.as_bytes()).unwrap();
+        let shown = format!("{armor:?}");
+        let headers = r#"headers: [Header { key: "Comment", value: "one" }, Header { key: "Version", value: "" }]"#;
+        assert!(shown.contains(headers), "{shown}");
     }
 
     #[test]

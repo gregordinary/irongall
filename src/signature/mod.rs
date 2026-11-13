@@ -85,6 +85,7 @@ mod tests;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::fmt;
 
 pub use subpacket::{
     KeyFlags, RevocationCode, RevocationReason, Subpacket, SubpacketType, Subpackets,
@@ -167,7 +168,10 @@ pub enum SignatureMaterial<'a> {
 /// on demand, such as its subpackets and material, is read from that: so the
 /// memory a signature holds is its body and a few words, whatever the body
 /// holds. Two signatures are equal when their bodies are, octet for octet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Its [`Debug`](fmt::Debug) form shows what the accessors read from the
+/// body, not the body's octets.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Signature {
     /// The body: from the version through the material, and, for a
     /// signature read with what irongall cannot honor overlooked, any octets
@@ -196,6 +200,25 @@ pub struct Signature {
     /// Whether the unhashed area read: one that did not, overlooked, is
     /// taken for an empty one.
     unhashed_read: bool,
+}
+
+impl fmt::Debug for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Signature")
+            .field("version", &self.version)
+            .field("signature_type", &self.signature_type)
+            .field("public_key_algorithm", &self.public_key_algorithm)
+            .field("hash_algorithm", &self.hash_algorithm)
+            .field("creation_time", &self.creation_time)
+            .field("hashed_subpackets", &self.hashed_subpackets())
+            .field("unhashed_subpackets", &self.unhashed_subpackets())
+            .field("hash_prefix", &self.hash_prefix)
+            .field("salt", &self.salt())
+            .field("material", &self.material())
+            .field("embedded_signatures", &self.embedded)
+            .field("honored", &self.is_honored())
+            .finish()
+    }
 }
 
 impl Signature {

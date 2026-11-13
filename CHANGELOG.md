@@ -31,6 +31,8 @@ public API changes, since a verifier's verdicts are part of its contract.
   releases compared what was read from them, so two version 4 signatures
   whose material differed only in the bit count written for an integer
   compared equal.
+- The `Debug` forms of `Signature` and `PublicKey` show what their accessors
+  read, and not the octets of the body.
 
 ## [0.1.2] - 2026-11-10
 

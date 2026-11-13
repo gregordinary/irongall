@@ -106,8 +106,10 @@ const ED25519_LEGACY_OID: &[u8] = &[0x2B, 0x06, 0x01, 0x04, 0x01, 0xDA, 0x47, 0x
 /// A public key: the content of a Public Key or Public Subkey packet.
 ///
 /// A key holds its packet's body, and its material is read from that on
-/// demand. Two keys are equal when their bodies are, octet for octet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// demand. Two keys are equal when their bodies are, octet for octet. Its
+/// [`Debug`](fmt::Debug) form shows what the accessors read, not the body's
+/// octets.
+#[derive(Clone, PartialEq, Eq)]
 pub struct PublicKey {
     /// The packet's body, which a signature over the key hashes (RFC 9580
     /// §5.2.4), and which the material is read from.
@@ -116,6 +118,18 @@ pub struct PublicKey {
     creation_time: u32,
     version: Version,
     algorithm: PublicKeyAlgorithm,
+}
+
+impl fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PublicKey")
+            .field("version", &self.version)
+            .field("creation_time", &self.creation_time)
+            .field("algorithm", &self.algorithm)
+            .field("material", &self.material())
+            .field("fingerprint", &self.fingerprint)
+            .finish()
+    }
 }
 
 impl PublicKey {
@@ -531,6 +545,21 @@ mod tests {
             parse(&body(6, 1, &exact)).unwrap().material(),
             KeyMaterial::Rsa { .. }
         ));
+    }
+
+    /// A key's `Debug` form shows what the accessors read, the material
+    /// among them, rather than the body it reads them from.
+    #[test]
+    fn debug_shows_what_the_accessors_read() {
+        let key = parse(&body(4, 27, &[0x11; 32])).unwrap();
+        let shown = format!("{key:?}");
+        for field in [
+            format!("material: {:?}", key.material()),
+            format!("fingerprint: {:?}", key.fingerprint()),
+        ] {
+            assert!(shown.contains(&field), "{field} in {shown}");
+        }
+        assert!(!shown.contains("body"), "{shown}");
     }
 
     #[test]

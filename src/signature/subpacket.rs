@@ -2,6 +2,7 @@
 //! or version 6 signature.
 
 use alloc::vec::Vec;
+use core::fmt;
 use core::iter::FusedIterator;
 
 use super::{Signature, Unhonored};
@@ -99,9 +100,17 @@ impl<'a> Subpacket<'a> {
 
 /// The subpackets of one of a signature's areas, in the order they appear:
 /// see [`Signature::hashed_subpackets`].
-#[derive(Debug, Clone)]
+///
+/// Its [`Debug`](fmt::Debug) form lists the subpackets that remain.
+#[derive(Clone)]
 pub struct Subpackets<'a> {
     area: Fields<'a>,
+}
+
+impl fmt::Debug for Subpackets<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.clone()).finish()
+    }
 }
 
 impl<'a> Subpackets<'a> {

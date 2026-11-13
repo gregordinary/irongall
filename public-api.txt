@@ -52,6 +52,8 @@ pub fn irongall::armor::Armor::data(&self) -> &[u8]
 pub fn irongall::armor::Armor::headers(&self) -> irongall::armor::Headers<'_>
 pub fn irongall::armor::Armor::into_data(self) -> alloc::vec::Vec<u8>
 pub fn irongall::armor::Armor::label(&self) -> irongall::armor::Label
+impl core::fmt::Debug for irongall::armor::Armor
+pub fn irongall::armor::Armor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for irongall::armor::Armor
 impl core::marker::Send for irongall::armor::Armor
 impl core::marker::Sync for irongall::armor::Armor
@@ -87,6 +89,8 @@ impl<'a> core::marker::UnsafeUnpin for irongall::armor::Header<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for irongall::armor::Header<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for irongall::armor::Header<'a>
 pub struct irongall::armor::Headers<'a>
+impl core::fmt::Debug for irongall::armor::Headers<'_>
+pub fn irongall::armor::Headers<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::iter::traits::marker::FusedIterator for irongall::armor::Headers<'_>
 impl<'a> core::iter::traits::iterator::Iterator for irongall::armor::Headers<'a>
 pub type irongall::armor::Headers<'a>::Item = irongall::armor::Header<'a>
@@ -452,6 +456,8 @@ pub fn irongall::key::PublicKey::from_packet(&irongall::packet::Packet<'_>) -> c
 pub fn irongall::key::PublicKey::key_id(&self) -> irongall::key::KeyId
 pub fn irongall::key::PublicKey::material(&self) -> irongall::key::KeyMaterial<'_>
 pub fn irongall::key::PublicKey::version(&self) -> irongall::packet::Version
+impl core::fmt::Debug for irongall::key::PublicKey
+pub fn irongall::key::PublicKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for irongall::key::PublicKey
 impl core::marker::Send for irongall::key::PublicKey
 impl core::marker::Sync for irongall::key::PublicKey
@@ -891,6 +897,8 @@ pub fn irongall::signature::Signature::version(&self) -> irongall::packet::Versi
 impl irongall::signature::Signature
 pub fn irongall::signature::Signature::document_hash(&self) -> core::result::Result<irongall::signature::DocumentHash<'_>, irongall::signature::VerifyError>
 pub fn irongall::signature::Signature::verify(&self, &irongall::key::PublicKey, irongall::signature::Subject<'_>) -> core::result::Result<(), irongall::signature::VerifyError>
+impl core::fmt::Debug for irongall::signature::Signature
+pub fn irongall::signature::Signature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for irongall::signature::Signature
 impl core::marker::Send for irongall::signature::Signature
 impl core::marker::Sync for irongall::signature::Signature
@@ -980,6 +988,8 @@ impl core::marker::UnsafeUnpin for irongall::signature::SubpacketType
 impl core::panic::unwind_safe::RefUnwindSafe for irongall::signature::SubpacketType
 impl core::panic::unwind_safe::UnwindSafe for irongall::signature::SubpacketType
 pub struct irongall::signature::Subpackets<'a>
+impl core::fmt::Debug for irongall::signature::Subpackets<'_>
+pub fn irongall::signature::Subpackets<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::iter::traits::marker::FusedIterator for irongall::signature::Subpackets<'_>
 impl<'a> core::iter::traits::iterator::Iterator for irongall::signature::Subpackets<'a>
 pub type irongall::signature::Subpackets<'a>::Item = irongall::signature::Subpacket<'a>
